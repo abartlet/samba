@@ -59,5 +59,6 @@ script:
 
 install:
  - git fetch --unshallow
- - ./script/autobuild.py --tail --testbase=/tmp --ccache=$HOME/.ccache --quick
+ - ./script/autobuild.py --tail --testbase=/tmp --ccache=$HOME/.ccache --skip=samba,pidl --instant-start
+ 
 
