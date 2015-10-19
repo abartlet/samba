@@ -274,17 +274,18 @@ class buildlist(object):
         self.tlist = []
         self.tail_proc = None
         self.retry = None
+        if options.instant_start:
+            os.environ['AUTOBUILD_RANDOM_SLEEP_OVERRIDE'] = '1'
         if tasknames == []:
-            if options.quick:
-                tasknames = quicktasks
-                os.environ['AUTOBUILD_RANDOM_SLEEP_OVERRIDE'] = '1'
-            else:
-                tasknames = defaulttasks
+            tasknames = defaulttasks
         else:
             # If we are only running one test,
             # do not sleep randomly to wait for it to start
             os.environ['AUTOBUILD_RANDOM_SLEEP_OVERRIDE'] = '1'
 
+        tasknames = tasknames
+        if options.skip is not None:
+            tasknames = [ t for t in tasknames if t not in options.skip.split(',') ]
             
         for n in tasknames:
             b = builder(n, tasks[n])
@@ -525,10 +526,12 @@ parser.add_option("", "--log-base", help="location where the logs can be found (
                   default=gitroot, type='str')
 parser.add_option("", "--attach-logs", help="Attach logs to mails sent on success/failure?",
                   default=False, action="store_true")
-parser.add_option("", "--quick", help="Do not run the main test, and do not wait to start the builds",
+parser.add_option("", "--instant-start", help="Do not wait to start the builds",
                   default=False, action="store_true")
 parser.add_option("", "--ccache", help="Run the build under ccache, using this directory",
                   default=None)
+parser.add_option("", "--skip", help="Skip this build target from the default list",
+                  type='str', default=None)
 
 def send_email(subject, text, log_tar):
     outer = MIMEMultipart()
