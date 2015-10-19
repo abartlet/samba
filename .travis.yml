@@ -1,5 +1,7 @@
 language: c
 
+dist: trusty
+
 cache:
   directories:
   - $HOME/.ccache
