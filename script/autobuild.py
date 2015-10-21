@@ -731,6 +731,7 @@ if options.email is not None:
     email_failure(status, failed_task, failed_stage, failed_tag, errstr,
                   elapsed_time, log_base=options.log_base)
 else:
+    elapsed_minutes = elapsed_time / 60.0
     print '''
 
 ####################################################################
@@ -746,7 +747,7 @@ the autobuild has been abandoned. Please fix the error and resubmit.
 
 ####################################################################
 
-''' % (platform.node(), elapsed_time, failed_task, errstr)
+''' % (platform.node(), elapsed_minutes, failed_task, errstr)
     
 cleanup()
 print(errstr)
