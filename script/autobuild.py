@@ -38,6 +38,7 @@ builddirs = {
     }
 
 defaulttasks = [ "ctdb", "samba", "samba-xc", "samba-ctdb", "samba-libs", "ldb", "tdb", "talloc", "replace", "tevent", "pidl" ]
+quicktasks = [ t for t in defaulttasks if t != "samba"]
 
 samba_configure_params = " --picky-developer ${PREFIX} --with-profiling-data"
 
@@ -273,6 +274,8 @@ class buildlist(object):
         self.tlist = []
         self.tail_proc = None
         self.retry = None
+        if options.instant_start:
+            os.environ['AUTOBUILD_RANDOM_SLEEP_OVERRIDE'] = '1'
         if tasknames == []:
             tasknames = defaulttasks
         else:
@@ -280,6 +283,10 @@ class buildlist(object):
             # do not sleep randomly to wait for it to start
             os.environ['AUTOBUILD_RANDOM_SLEEP_OVERRIDE'] = '1'
 
+        tasknames = tasknames
+        if options.skip is not None:
+            tasknames = [ t for t in tasknames if t not in options.skip.split(',') ]
+            
         for n in tasknames:
             b = builder(n, tasks[n])
             self.tlist.append(b)
@@ -519,6 +526,12 @@ parser.add_option("", "--log-base", help="location where the logs can be found (
                   default=gitroot, type='str')
 parser.add_option("", "--attach-logs", help="Attach logs to mails sent on success/failure?",
                   default=False, action="store_true")
+parser.add_option("", "--instant-start", help="Do not wait to start the builds",
+                  default=False, action="store_true")
+parser.add_option("", "--ccache", help="Run the build under ccache, using this directory",
+                  default=None)
+parser.add_option("", "--skip", help="Skip this build target from the default list",
+                  type='str', default=None)
 
 def send_email(subject, text, log_tar):
     outer = MIMEMultipart()
@@ -633,6 +646,16 @@ try:
     os.makedirs(testbase)
 except Exception, reason:
     raise Exception("Unable to create %s : %s" % (testbase, reason))
+
+if options.ccache is not None:
+    if not os.path.isdir(options.ccache):
+        try:
+            os.makedirs(os.path.join(options.ccache))
+        except Exception, reason:
+            raise Exception("Unable to create %s : %s" % (options.ccache, reason))
+    os.environ['CC'] = "ccache cc"
+    os.environ['CCACHE_DIR'] = options.ccache
+
 cleanup_list.append(testbase)
 
 if options.daemon:
@@ -707,7 +730,24 @@ blist.tarlogs("logs.tar.gz")
 if options.email is not None:
     email_failure(status, failed_task, failed_stage, failed_tag, errstr,
                   elapsed_time, log_base=options.log_base)
+else:
+    print '''
 
+####################################################################
+
+AUTOBUILD FAILURE
+
+Your autobuild on %s failed after %.1f minutes
+when trying to test %s with the following error:
+
+   %s
+
+the autobuild has been abandoned. Please fix the error and resubmit.
+
+####################################################################
+
+''' % (platform.node(), elapsed_time, failed_task, errstr)
+    
 cleanup()
 print(errstr)
 print("Logs in logs.tar.gz")
