@@ -26,6 +26,7 @@ builddirs = {
     "samba-xc" : ".",
     "samba-ctdb" : ".",
     "samba-libs"  : ".",
+    "samba-static"  : ".",
     "ldb"     : "lib/ldb",
     "tdb"     : "lib/tdb",
     "talloc"  : "lib/talloc",
@@ -37,7 +38,7 @@ builddirs = {
     "retry"   : "."
     }
 
-defaulttasks = [ "ctdb", "samba", "samba-xc", "samba-ctdb", "samba-libs", "ldb", "tdb", "talloc", "replace", "tevent", "pidl" ]
+defaulttasks = [ "ctdb", "samba", "samba-xc", "samba-ctdb", "samba-libs", "samba-static", "ldb", "tdb", "talloc", "replace", "tevent", "pidl" ]
 
 samba_configure_params = " --picky-developer ${PREFIX} --with-profiling-data"
 
@@ -112,30 +113,32 @@ tasks = {
                       ("ldb-make", "cd lib/ldb && make", "text/plain"),
                       ("ldb-install", "cd lib/ldb && make install", "text/plain"),
 
-                      ("configure", samba_libs_configure_samba, "text/plain"),
-                      ("make", "make", "text/plain"),
-                      ("install", "make install", "text/plain"),
-                      ("dist", "make dist", "text/plain"),
+                      ("nondevel-configure", "./configure ${PREFIX}", "text/plain"),
+                      ("nondevel-make", "make -j", "text/plain"),
+                      ("nondevel-check", "./bin/smbd -b | grep WITH_NTVFS_FILESERVER && exit 1; exit 0", "text/plain"),
+                      ("nondevel-install", "make install", "text/plain"),
+                      ("nondevel-dist", "make dist", "text/plain"),
 
                       # retry with all modules shared
                       ("allshared-distclean", "make distclean", "text/plain"),
                       ("allshared-configure", samba_libs_configure_samba + " --with-shared-modules=ALL", "text/plain"),
-                      ("allshared-make", "make", "text/plain"),
+                      ("allshared-make", "make -j", "text/plain")],
 
-                      # retry with all modules static
-                      ("allstatic-distclean", "make distclean", "text/plain"),
-                      ("allstatic-configure", samba_libs_configure_samba + " --with-static-modules=ALL", "text/plain"),
-                      ("allstatic-make", "make", "text/plain"),
+    "samba-static" : [
+                      ("random-sleep", "script/random-sleep.sh 60 600", "text/plain"),
+                      # build with all modules static
+                      ("allstatic-configure", "./configure.developer " + samba_configure_params + " --with-static-modules=ALL", "text/plain"),
+                      ("allstatic-make", "make -j", "text/plain"),
 
                       # retry without any required modules
                       ("none-distclean", "make distclean", "text/plain"),
-                      ("none-configure", samba_libs_configure_samba + " --with-static-modules=!FORCED,!DEFAULT --with-shared-modules=!FORCED,!DEFAULT", "text/plain"),
-                      ("none-make", "make", "text/plain"),
+                      ("none-configure", "./configure.developer " + samba_configure_params + " --with-static-modules=!FORCED,!DEFAULT --with-shared-modules=!FORCED,!DEFAULT", "text/plain"),
+                      ("none-make", "make -j", "text/plain"),
 
                       # retry with nonshared smbd and smbtorture
                       ("nonshared-distclean", "make distclean", "text/plain"),
-                      ("nonshared-configure", samba_libs_configure_base + " --bundled-libraries=talloc,tdb,pytdb,ldb,pyldb,tevent,pytevent --with-static-modules=ALL --nonshared-binary=smbtorture,smbd/smbd", "text/plain"),
-                      ("nonshared-make", "make", "text/plain")],
+                      ("nonshared-configure", "./configure.developer " + samba_configure_params + " --bundled-libraries=talloc,tdb,pytdb,ldb,pyldb,tevent,pytevent --with-static-modules=ALL --nonshared-binary=smbtorture,smbd/smbd", "text/plain"),
+                      ("nonshared-make", "make -j", "text/plain")],
 
     "ldb" : [
               ("random-sleep", "../../script/random-sleep.sh 60 600", "text/plain"),
@@ -707,7 +710,25 @@ blist.tarlogs("logs.tar.gz")
 if options.email is not None:
     email_failure(status, failed_task, failed_stage, failed_tag, errstr,
                   elapsed_time, log_base=options.log_base)
+else:
+    elapsed_minutes = elapsed_time / 60.0
+    print '''
 
+####################################################################
+
+AUTOBUILD FAILURE
+
+Your autobuild on %s failed after %.1f minutes
+when trying to test %s with the following error:
+
+   %s
+
+the autobuild has been abandoned. Please fix the error and resubmit.
+
+####################################################################
+
+''' % (platform.node(), elapsed_minutes, failed_task, errstr)
+    
 cleanup()
 print(errstr)
 print("Logs in logs.tar.gz")
