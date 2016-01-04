@@ -1,0 +1,66 @@
+language: c
+
+cache: ccache
+
+addons:
+  apt:
+    packages:
+      - acl
+      - attr
+      - autoconf
+      - bison
+      - build-essential
+      - ccache
+      - curl
+      - debhelper
+      - dnsutils
+      - docbook-xml
+      - docbook-xsl
+      - emacs24-nox
+      - flex
+      - gdb
+      - git
+      - krb5-user
+      - libacl1-dev
+      - libaio-dev
+      - libattr1-dev
+      - libblkid-dev
+      - libbsd-dev
+      - libcap-dev
+      - libcups2-dev
+      - libgnutls-dev
+      - libjson-perl
+      - libldap2-dev
+      - libncurses5-dev
+      - libpam0g-dev
+      - libparse-yapp-perl
+      - libpopt-dev
+      - libreadline-dev
+      - perl
+      - perl-modules
+      - pkg-config
+      - python-all-dev
+      - python-crypto
+      - python-dev
+      - python-dnspython
+      - xsltproc
+      - zlib1g-dev
+
+ # Everything except samba (long tests)
+env:
+  - TASK=ctdb
+  - TASK=samba
+  - TASK=samba-xc
+  - TASK=samba-ctdb
+  - TASK=samba-libs
+  - TASK=samba-static
+  - TASK=ldb
+  - TASK=tdb
+  - TASK=talloc
+  - TASK=replace
+  - TASK=tevent
+  - TASK=pidl
+
+script:
+ - git fetch --unshallow
+ - SELFTEST_QUICK=1 ./script/autobuild.py --tail --testbase=/tmp $TASK
