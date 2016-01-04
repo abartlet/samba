@@ -16,16 +16,23 @@
    You should have received a copy of the GNU General Public License
    along with this program; if not, see <http://www.gnu.org/licenses/>.
 */
-#include "includes.h"
-#include "tdb.h"
+#include "replace.h"
 #include "system/network.h"
 #include "system/filesys.h"
 #include "system/wait.h"
-#include "../include/ctdb_private.h"
-#include "lib/util/dlinklist.h"
-#include "lib/tdb_wrap/tdb_wrap.h"
-#include "../common/rb_tree.h"
 
+#include <talloc.h>
+#include <tevent.h>
+
+#include "lib/tdb_wrap/tdb_wrap.h"
+#include "lib/util/dlinklist.h"
+#include "lib/util/debug.h"
+
+#include "ctdb_private.h"
+
+#include "common/rb_tree.h"
+#include "common/common.h"
+#include "common/logging.h"
 
 /**
  * Cancel a transaction on database
@@ -208,8 +215,8 @@ static void ctdb_start_db_freeze(struct ctdb_db_context *ctdb_db)
 static int ctdb_db_freeze_waiter_destructor(struct ctdb_db_freeze_waiter *w)
 {
 	/* 'c' pointer is talloc_memdup(), so cannot use talloc_get_type */
-	struct ctdb_req_control *c =
-		(struct ctdb_req_control *)w->private_data;
+	struct ctdb_req_control_old *c =
+		(struct ctdb_req_control_old *)w->private_data;
 
 	ctdb_request_control_reply(w->ctdb, c, NULL, w->status, NULL);
 	return 0;
@@ -219,7 +226,7 @@ static int ctdb_db_freeze_waiter_destructor(struct ctdb_db_freeze_waiter *w)
  * freeze a database
  */
 int32_t ctdb_control_db_freeze(struct ctdb_context *ctdb,
-			       struct ctdb_req_control *c,
+			       struct ctdb_req_control_old *c,
 			       uint32_t db_id,
 			       bool *async_reply)
 {
@@ -281,7 +288,7 @@ int32_t ctdb_control_db_thaw(struct ctdb_context *ctdb, uint32_t db_id)
 struct ctdb_freeze_waiter {
 	struct ctdb_freeze_waiter *next, *prev;
 	struct ctdb_context *ctdb;
-	struct ctdb_req_control *c;
+	struct ctdb_req_control_old *c;
 	uint32_t priority;
 	int32_t status;
 };
@@ -539,7 +546,7 @@ static int ctdb_freeze_waiter_destructor(struct ctdb_freeze_waiter *w)
 /*
   freeze the databases
  */
-int32_t ctdb_control_freeze(struct ctdb_context *ctdb, struct ctdb_req_control *c, bool *async_reply)
+int32_t ctdb_control_freeze(struct ctdb_context *ctdb, struct ctdb_req_control_old *c, bool *async_reply)
 {
 	struct ctdb_freeze_waiter *w;
 	uint32_t priority;
@@ -774,8 +781,8 @@ static int db_commit_transaction(struct ctdb_db_context *ctdb_db,
 int32_t ctdb_control_db_transaction_start(struct ctdb_context *ctdb,
 					  TDB_DATA indata)
 {
-	struct ctdb_control_transdb *w =
-		(struct ctdb_control_transdb *)indata.dptr;
+	struct ctdb_transdb *w =
+		(struct ctdb_transdb *)indata.dptr;
 	struct ctdb_db_context *ctdb_db;
 	struct db_start_transaction_state state;
 
@@ -787,7 +794,7 @@ int32_t ctdb_control_db_transaction_start(struct ctdb_context *ctdb,
 		return -1;
 	}
 
-	state.transaction_id = w->transaction_id;
+	state.transaction_id = w->tid;
 	state.transaction_started = true;
 
 	return db_start_transaction(ctdb_db, &state);
@@ -821,8 +828,8 @@ int32_t ctdb_control_db_transaction_cancel(struct ctdb_context *ctdb,
 int32_t ctdb_control_db_transaction_commit(struct ctdb_context *ctdb,
 					   TDB_DATA indata)
 {
-	struct ctdb_control_transdb *w =
-		(struct ctdb_control_transdb *)indata.dptr;
+	struct ctdb_transdb *w =
+		(struct ctdb_transdb *)indata.dptr;
 	struct ctdb_db_context *ctdb_db;
 	struct db_commit_transaction_state state;
 	int healthy_nodes, i;
@@ -842,7 +849,7 @@ int32_t ctdb_control_db_transaction_commit(struct ctdb_context *ctdb,
 		}
 	}
 
-	state.transaction_id = w->transaction_id;
+	state.transaction_id = w->tid;
 	state.healthy_nodes = healthy_nodes;
 
 	return db_commit_transaction(ctdb_db, &state);
@@ -953,7 +960,7 @@ fail:
  */
 int32_t ctdb_control_wipe_database(struct ctdb_context *ctdb, TDB_DATA indata)
 {
-	struct ctdb_control_transdb w = *(struct ctdb_control_transdb *)indata.dptr;
+	struct ctdb_transdb w = *(struct ctdb_transdb *)indata.dptr;
 	struct ctdb_db_context *ctdb_db;
 
 	ctdb_db = find_ctdb_db(ctdb, w.db_id);
@@ -972,8 +979,8 @@ int32_t ctdb_control_wipe_database(struct ctdb_context *ctdb, TDB_DATA indata)
 		return -1;
 	}
 
-	if (w.transaction_id != ctdb_db->freeze_transaction_id) {
-		DEBUG(DEBUG_ERR,(__location__ " incorrect transaction id 0x%x in commit\n", w.transaction_id));
+	if (w.tid != ctdb_db->freeze_transaction_id) {
+		DEBUG(DEBUG_ERR,(__location__ " incorrect transaction id 0x%x in commit\n", w.tid));
 		return -1;
 	}
 

@@ -20,6 +20,8 @@
 #ifndef __CTDB_PROTOCOL_H__
 #define __CTDB_PROTOCOL_H__
 
+#include <tdb.h>
+
 #define CTDB_MAGIC	0x43544442 /* CTDB */
 #define CTDB_PROTOCOL	1
 
@@ -572,7 +574,7 @@ struct ctdb_tunable_list {
 	uint32_t monitor_interval;
 	uint32_t tickle_update_interval;
 	uint32_t script_timeout;
-	uint32_t script_timeout_count; /* allow dodgy scripts to hang this many times in a row before we mark the node unhealthy */
+	uint32_t monitor_timeout_count; /* allow dodgy scripts to hang this many times in a row before we mark the node unhealthy */
 	uint32_t script_unhealthy_on_timeout; /* obsolete */
 	uint32_t recovery_grace_period;
 	uint32_t recovery_ban_period;
@@ -703,7 +705,11 @@ struct ctdb_public_ip_list {
  */
 #define CTDB_CAP_PARALLEL_RECOVERY	0x00010000
 
-#define CTDB_CAP_DEFAULT		(CTDB_CAP_PARALLEL_RECOVERY)
+#define CTDB_CAP_FEATURES		(CTDB_CAP_PARALLEL_RECOVERY)
+
+#define CTDB_CAP_DEFAULT		(CTDB_CAP_RECMASTER | \
+					 CTDB_CAP_LMASTER   | \
+					 CTDB_CAP_FEATURES)
 
 struct ctdb_node_and_flags {
 	uint32_t pnn;
@@ -976,6 +982,8 @@ union ctdb_message_data {
 	struct ctdb_disable_message *disable;
 	/* SRVID_DISABLE_IP_CHECK */
 	uint32_t timeout;
+	/* Other */
+	TDB_DATA data;
 };
 
 struct ctdb_req_message {
@@ -997,8 +1005,8 @@ struct ctdb_server_id {
 };
 
 enum ctdb_g_lock_type {
-	G_LOCK_READ = 0,
-	G_LOCK_WRITE = 1,
+	CTDB_G_LOCK_READ = 0,
+	CTDB_G_LOCK_WRITE = 1,
 };
 
 struct ctdb_g_lock {

@@ -18,17 +18,24 @@
    along with this program; if not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "includes.h"
+#include "replace.h"
 #include "system/network.h"
 #include "system/filesys.h"
 #include "system/wait.h"
-#include "../include/ctdb_private.h"
+
+#include "lib/util/debug.h"
+
+#include "protocol/protocol.h"
+
 #include <netinet/if_ether.h>
 #include <netinet/ip6.h>
 #include <netinet/icmp6.h>
 #include <net/if_arp.h>
 #include <netpacket/packet.h>
 #include <sys/prctl.h>
+
+#include "common/logging.h"
+#include "common/system.h"
 
 #ifndef ETHERTYPE_IP6
 #define ETHERTYPE_IP6 0x86dd
@@ -412,7 +419,7 @@ int ctdb_sys_send_tcp(const ctdb_sock_addr *dest,
 			return -1;
 
 		}
-		/* sendto() dont like if the port is set and the socket is
+		/* sendto() don't like if the port is set and the socket is
 		   in raw mode.
 		*/
 		tmpdest = discard_const(dest);
@@ -570,7 +577,7 @@ bool ctdb_sys_check_iface_exists(const char *iface)
 
 	s = socket(PF_PACKET, SOCK_RAW, 0);
 	if (s == -1){
-		/* We dont know if the interface exists, so assume yes */
+		/* We don't know if the interface exists, so assume yes */
 		DEBUG(DEBUG_CRIT,(__location__ " failed to open raw socket\n"));
 		return true;
 	}
@@ -595,16 +602,4 @@ int ctdb_get_peer_pid(const int fd, pid_t *peer_pid)
 		*peer_pid = cr.pid;
 	}
 	return ret;
-}
-
-/*
- * Set process name
- */
-int ctdb_set_process_name(const char *name)
-{
-	char procname[16];
-
-	strncpy(procname, name, 15);
-	procname[15] = '\0';
-	return prctl(PR_SET_NAME, (unsigned long)procname, 0, 0, 0);
 }

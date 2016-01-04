@@ -461,6 +461,8 @@ void reply_ntcreate_and_X(struct smb_request *req)
 	int oplock_request;
 	uint8_t oplock_granted = NO_OPLOCK_RETURN;
 	struct case_semantics_state *case_state = NULL;
+	uint32_t ucf_flags = UCF_PREP_CREATEFILE |
+			(req->posix_pathnames ? UCF_POSIX_PATHNAMES : 0);
 	TALLOC_CTX *ctx = talloc_tos();
 
 	START_PROFILE(SMBntcreateX);
@@ -538,7 +540,7 @@ void reply_ntcreate_and_X(struct smb_request *req)
 				conn,
 				req->flags2 & FLAGS2_DFS_PATHNAMES,
 				fname,
-				UCF_PREP_CREATEFILE,
+				ucf_flags,
 				NULL,
 				&smb_fname);
 
@@ -760,9 +762,25 @@ static void do_nt_transact_create_pipe(connection_struct *conn,
 
 	flags = IVAL(params,0);
 
-	srvstr_get_path(ctx, params, req->flags2, &fname, params+53,
-			parameter_count-53, STR_TERMINATE,
+	if (req->posix_pathnames) {
+		srvstr_get_path_posix(ctx,
+			params,
+			req->flags2,
+			&fname,
+			params+53,
+			parameter_count-53,
+			STR_TERMINATE,
 			&status);
+	} else {
+		srvstr_get_path(ctx,
+			params,
+			req->flags2,
+			&fname,
+			params+53,
+			parameter_count-53,
+			STR_TERMINATE,
+			&status);
+	}
 	if (!NT_STATUS_IS_OK(status)) {
 		reply_nterror(req, status);
 		return;
@@ -1000,6 +1018,8 @@ static void call_nt_transact_create(connection_struct *conn,
 	int oplock_request;
 	uint8_t oplock_granted;
 	struct case_semantics_state *case_state = NULL;
+	uint32_t ucf_flags = UCF_PREP_CREATEFILE |
+			(req->posix_pathnames ? UCF_POSIX_PATHNAMES : 0);
 	TALLOC_CTX *ctx = talloc_tos();
 
 	DEBUG(5,("call_nt_transact_create\n"));
@@ -1048,9 +1068,25 @@ static void call_nt_transact_create(connection_struct *conn,
 	 */
 	create_options &= ~NTCREATEX_OPTIONS_MUST_IGNORE_MASK;
 
-	srvstr_get_path(ctx, params, req->flags2, &fname,
-			params+53, parameter_count-53,
-			STR_TERMINATE, &status);
+	if (req->posix_pathnames) {
+		srvstr_get_path_posix(ctx,
+			params,
+			req->flags2,
+			&fname,
+			params+53,
+			parameter_count-53,
+			STR_TERMINATE,
+			&status);
+	} else {
+		srvstr_get_path(ctx,
+			params,
+			req->flags2,
+			&fname,
+			params+53,
+			parameter_count-53,
+			STR_TERMINATE,
+			&status);
+	}
 	if (!NT_STATUS_IS_OK(status)) {
 		reply_nterror(req, status);
 		goto out;
@@ -1068,7 +1104,7 @@ static void call_nt_transact_create(connection_struct *conn,
 				conn,
 				req->flags2 & FLAGS2_DFS_PATHNAMES,
 				fname,
-				UCF_PREP_CREATEFILE,
+				ucf_flags,
 				NULL,
 				&smb_fname);
 
@@ -1524,8 +1560,8 @@ void reply_ntrename(struct smb_request *req)
 	bool src_has_wcard = False;
 	bool dest_has_wcard = False;
 	uint32_t attrs;
-	uint32_t ucf_flags_src = 0;
-	uint32_t ucf_flags_dst = 0;
+	uint32_t ucf_flags_src = (req->posix_pathnames ? UCF_POSIX_PATHNAMES : 0);
+	uint32_t ucf_flags_dst = (req->posix_pathnames ? UCF_POSIX_PATHNAMES : 0);
 	uint16_t rename_type;
 	TALLOC_CTX *ctx = talloc_tos();
 	bool stream_rename = false;
@@ -1548,7 +1584,7 @@ void reply_ntrename(struct smb_request *req)
 		goto out;
 	}
 
-	if (ms_has_wild(oldname)) {
+	if (!req->posix_pathnames && ms_has_wild(oldname)) {
 		reply_nterror(req, NT_STATUS_OBJECT_PATH_SYNTAX_BAD);
 		goto out;
 	}
@@ -1561,7 +1597,7 @@ void reply_ntrename(struct smb_request *req)
 		goto out;
 	}
 
-	if (!lp_posix_pathnames()) {
+	if (!req->posix_pathnames) {
 		/* The newname must begin with a ':' if the
 		   oldname contains a ':'. */
 		if (strchr_m(oldname, ':')) {
@@ -1831,9 +1867,28 @@ static void call_nt_transact_rename(connection_struct *conn,
 	if (!check_fsp(conn, req, fsp)) {
 		return;
 	}
-	srvstr_get_path_wcard(ctx, params, req->flags2, &new_name, params+4,
-			      parameter_count - 4,
-			      STR_TERMINATE, &status, &dest_has_wcard);
+	if (req->posix_pathnames) {
+		srvstr_get_path_wcard_posix(ctx,
+				params,
+				req->flags2,
+				&new_name,
+				params+4,
+				parameter_count - 4,
+				STR_TERMINATE,
+				&status,
+				&dest_has_wcard);
+	} else {
+		srvstr_get_path_wcard(ctx,
+				params,
+				req->flags2,
+				&new_name,
+				params+4,
+				parameter_count - 4,
+				STR_TERMINATE,
+				&status,
+				&dest_has_wcard);
+	}
+
 	if (!NT_STATUS_IS_OK(status)) {
 		reply_nterror(req, status);
 		return;

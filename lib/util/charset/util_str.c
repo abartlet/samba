@@ -210,7 +210,8 @@ _PUBLIC_ size_t strlen_m_ext_handle(struct smb_iconv_handle *ic,
 
 	while (*s) {
 		size_t c_size;
-		codepoint_t c = next_codepoint_handle_ext(ic, s, src_charset, &c_size);
+		codepoint_t c = next_codepoint_handle_ext(ic, s, strnlen(s, 5),
+							  src_charset, &c_size);
 		s += c_size;
 
 		switch (dst_charset) {
@@ -545,13 +546,13 @@ char *strstr_m(const char *src, const char *findstr)
 	frame = talloc_stackframe();
 
 	if (!push_ucs2_talloc(frame, &src_w, src, &converted_size)) {
-		DBG_WARNING("strstr_m: src malloc fail\n");
+		DBG_WARNING("src malloc fail\n");
 		TALLOC_FREE(frame);
 		return NULL;
 	}
 
 	if (!push_ucs2_talloc(frame, &find_w, findstr, &converted_size)) {
-		DBG_WARNING("strstr_m: find malloc fail\n");
+		DBG_WARNING("find malloc fail\n");
 		TALLOC_FREE(frame);
 		return NULL;
 	}

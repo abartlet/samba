@@ -153,7 +153,7 @@ NTSTATUS smbd_check_access_rights(struct connection_struct *conn,
 	 * Samba 3.6 and earlier granted execute access even
 	 * if the ACL did not contain execute rights.
 	 * Samba 4.0 is more correct and checks it.
-	 * The compatibilty mode allows to skip this check
+	 * The compatibilty mode allows one to skip this check
 	 * to smoothen upgrades.
 	 */
 	if (lp_acl_allow_execute_always(SNUM(conn))) {
@@ -362,7 +362,7 @@ NTSTATUS fd_open(struct connection_struct *conn,
 	 * client should be doing this.
 	 */
 
-	if (fsp->posix_open || !lp_follow_symlinks(SNUM(conn))) {
+	if ((fsp->posix_flags & FSP_POSIX_FLAGS_OPEN) || !lp_follow_symlinks(SNUM(conn))) {
 		flags |= O_NOFOLLOW;
 	}
 #endif
@@ -809,6 +809,7 @@ static NTSTATUS open_file(files_struct *fsp,
 			wild = smb_fname->base_name;
 		}
 		if ((local_flags & O_CREAT) && !file_existed &&
+		    !(fsp->posix_flags & FSP_POSIX_FLAGS_PATHNAMES) &&
 		    ms_has_wild(wild))  {
 			return NT_STATUS_OBJECT_NAME_INVALID;
 		}
@@ -945,7 +946,7 @@ static NTSTATUS open_file(files_struct *fsp,
 				access_mask);
 
 		if (NT_STATUS_EQUAL(status, NT_STATUS_OBJECT_NAME_NOT_FOUND) &&
-				fsp->posix_open &&
+				(fsp->posix_flags & FSP_POSIX_FLAGS_OPEN) &&
 				S_ISLNK(smb_fname->st.st_ex_mode)) {
 			/* This is a POSIX stat open for delete
 			 * or rename on a symlink that points
@@ -2528,7 +2529,8 @@ static NTSTATUS open_file_ntcreate(connection_struct *conn,
 	}
 
 	/* this is for OS/2 long file names - say we don't support them */
-	if (!lp_posix_pathnames() && strstr(smb_fname->base_name,".+,;=[].")) {
+	if (req != NULL && !req->posix_pathnames &&
+			strstr(smb_fname->base_name,".+,;=[].")) {
 		/* OS/2 Workplace shell fix may be main code stream in a later
 		 * release. */
 		DEBUG(5,("open_file_ntcreate: OS/2 long filenames are not "
@@ -2703,7 +2705,9 @@ static NTSTATUS open_file_ntcreate(connection_struct *conn,
 	fsp->access_mask = open_access_mask; /* We change this to the
 					      * requested access_mask after
 					      * the open is done. */
-	fsp->posix_open = posix_open;
+	if (posix_open) {
+		fsp->posix_flags |= FSP_POSIX_FLAGS_ALL;
+	}
 
 	if (timeval_is_zero(&request_time)) {
 		request_time = fsp->open_time;
@@ -3569,7 +3573,9 @@ static NTSTATUS open_directory(connection_struct *conn,
 	fsp->oplock_type = NO_OPLOCK;
 	fsp->sent_oplock_break = NO_BREAK_SENT;
 	fsp->is_directory = True;
-	fsp->posix_open = (file_attributes & FILE_FLAG_POSIX_SEMANTICS) ? True : False;
+	if (file_attributes & FILE_FLAG_POSIX_SEMANTICS) {
+		fsp->posix_flags |= FSP_POSIX_FLAGS_ALL;
+	}
 	status = fsp_set_smb_fname(fsp, smb_dname);
 	if (!NT_STATUS_IS_OK(status)) {
 		file_free(req, fsp);
@@ -4823,6 +4829,8 @@ NTSTATUS get_relative_fid_filename(connection_struct *conn,
 	files_struct *dir_fsp;
 	char *parent_fname = NULL;
 	char *new_base_name = NULL;
+	uint32_t ucf_flags = ((req != NULL && req->posix_pathnames) ?
+			UCF_POSIX_PATHNAMES : 0);
 	NTSTATUS status;
 
 	if (root_dir_fid == 0 || !smb_fname) {
@@ -4917,7 +4925,7 @@ NTSTATUS get_relative_fid_filename(connection_struct *conn,
 				conn,
 				req->flags2 & FLAGS2_DFS_PATHNAMES,
 				new_base_name,
-				0,
+				ucf_flags,
 				NULL,
 				smb_fname_out);
 	if (!NT_STATUS_IS_OK(status)) {
@@ -5034,7 +5042,7 @@ NTSTATUS create_file_default(connection_struct *conn,
 			status = NT_STATUS_NOT_A_DIRECTORY;
 			goto fail;
 		}
-		if (lp_posix_pathnames()) {
+		if (req != NULL && req->posix_pathnames) {
 			ret = SMB_VFS_LSTAT(conn, smb_fname);
 		} else {
 			ret = SMB_VFS_STAT(conn, smb_fname);

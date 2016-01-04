@@ -54,6 +54,15 @@ static char *store_file_unix_basic_info2(connection_struct *conn,
 				files_struct *fsp,
 				const SMB_STRUCT_STAT *psbuf);
 
+NTSTATUS check_access_fsp(const struct files_struct *fsp,
+			  uint32_t access_mask)
+{
+	if (!(fsp->access_mask & access_mask)) {
+		return NT_STATUS_ACCESS_DENIED;
+	}
+	return NT_STATUS_OK;
+}
+
 /********************************************************************
  The canonical "check access" based on object handle or path function.
 ********************************************************************/
@@ -63,20 +72,16 @@ NTSTATUS check_access(connection_struct *conn,
 				const struct smb_filename *smb_fname,
 				uint32_t access_mask)
 {
+	NTSTATUS status;
+
 	if (fsp) {
-		if (!(fsp->access_mask & access_mask)) {
-			return NT_STATUS_ACCESS_DENIED;
-		}
+		status = check_access_fsp(fsp, access_mask);
 	} else {
-		NTSTATUS status = smbd_check_access_rights(conn,
-					smb_fname,
-					false,
-					access_mask);
-		if (!NT_STATUS_IS_OK(status)) {
-			return status;
-		}
+		status = smbd_check_access_rights(conn, smb_fname,
+						  false, access_mask);
 	}
-	return NT_STATUS_OK;
+
+	return status;
 }
 
 /********************************************************************
@@ -1092,6 +1097,7 @@ static void call_trans2open(connection_struct *conn,
 	uint32_t create_disposition;
 	uint32_t create_options = 0;
 	uint32_t private_flags = 0;
+	uint32_t ucf_flags = (req->posix_pathnames ? UCF_POSIX_PATHNAMES : 0);
 	TALLOC_CTX *ctx = talloc_tos();
 
 	/*
@@ -1125,9 +1131,25 @@ static void call_trans2open(connection_struct *conn,
 		goto out;
 	}
 
-	srvstr_get_path(ctx, params, req->flags2, &fname, pname,
-			total_params - 28, STR_TERMINATE,
+	if (req->posix_pathnames) {
+		srvstr_get_path_posix(ctx,
+			params,
+			req->flags2,
+			&fname,
+			pname,
+			total_params - 28,
+			STR_TERMINATE,
 			&status);
+	} else {
+		srvstr_get_path(ctx,
+			params,
+			req->flags2,
+			&fname,
+			pname,
+			total_params - 28,
+			STR_TERMINATE,
+			&status);
+	}
 	if (!NT_STATUS_IS_OK(status)) {
 		reply_nterror(req, status);
 		goto out;
@@ -1141,7 +1163,7 @@ static void call_trans2open(connection_struct *conn,
 				conn,
 				req->flags2 & FLAGS2_DFS_PATHNAMES,
 				fname,
-				0,
+				ucf_flags,
 				NULL,
 				&smb_fname);
 	if (!NT_STATUS_IS_OK(status)) {
@@ -2472,7 +2494,8 @@ static void call_trans2findfirst(connection_struct *conn,
 	TALLOC_CTX *ctx = talloc_tos();
 	struct dptr_struct *dirptr = NULL;
 	struct smbd_server_connection *sconn = req->sconn;
-	uint32_t ucf_flags = (UCF_SAVE_LCOMP | UCF_ALWAYS_ALLOW_WCARD_LCOMP);
+	uint32_t ucf_flags = UCF_SAVE_LCOMP | UCF_ALWAYS_ALLOW_WCARD_LCOMP |
+			(req->posix_pathnames ? UCF_POSIX_PATHNAMES : 0);
 	bool backup_priv = false;
 	bool as_root = false;
 
@@ -2530,9 +2553,27 @@ close_if_end = %d requires_resume_key = %d backup_priv = %d level = 0x%x, max_da
 			goto out;
 	}
 
-	srvstr_get_path_wcard(ctx, params, req->flags2, &directory,
-			      params+12, total_params - 12,
-			      STR_TERMINATE, &ntstatus, &mask_contains_wcard);
+	if (req->posix_pathnames) {
+		srvstr_get_path_wcard_posix(ctx,
+				params,
+				req->flags2,
+				&directory,
+				params+12,
+				total_params - 12,
+				STR_TERMINATE,
+				&ntstatus,
+				&mask_contains_wcard);
+	} else {
+		srvstr_get_path_wcard(ctx,
+				params,
+				req->flags2,
+				&directory,
+				params+12,
+				total_params - 12,
+				STR_TERMINATE,
+				&ntstatus,
+				&mask_contains_wcard);
+	}
 	if (!NT_STATUS_IS_OK(ntstatus)) {
 		reply_nterror(req, ntstatus);
 		goto out;
@@ -2639,7 +2680,11 @@ total_data=%u (should be %u)\n", (unsigned int)total_data, (unsigned int)IVAL(pd
 	}
 	pdata = *ppdata;
 	data_end = pdata + max_data_bytes + DIR_ENTRY_SAFETY_MARGIN - 1;
-
+	/*
+	 * squash valgrind "writev(vector[...]) points to uninitialised byte(s)"
+	 * error.
+	 */
+	memset(pdata + total_data, 0, ((max_data_bytes + DIR_ENTRY_SAFETY_MARGIN) - total_data));
 	/* Realloc the params space */
 	*pparams = (char *)SMB_REALLOC(*pparams, 10);
 	if (*pparams == NULL) {
@@ -2884,10 +2929,27 @@ static void call_trans2findnext(connection_struct *conn,
 
 	if (!continue_bit) {
 		/* We only need resume_name if continue_bit is zero. */
-		srvstr_get_path_wcard(ctx, params, req->flags2, &resume_name,
-			      params+12,
-			      total_params - 12, STR_TERMINATE, &ntstatus,
-			      &mask_contains_wcard);
+		if (req->posix_pathnames) {
+			srvstr_get_path_wcard_posix(ctx,
+				params,
+				req->flags2,
+				&resume_name,
+				params+12,
+				total_params - 12,
+				STR_TERMINATE,
+				&ntstatus,
+				&mask_contains_wcard);
+		} else {
+			srvstr_get_path_wcard(ctx,
+				params,
+				req->flags2,
+				&resume_name,
+				params+12,
+				total_params - 12,
+				STR_TERMINATE,
+				&ntstatus,
+				&mask_contains_wcard);
+		}
 		if (!NT_STATUS_IS_OK(ntstatus)) {
 			/* Win9x or OS/2 can send a resume name of ".." or ".". This will cause the parser to
 			   complain (it thinks we're asking for the directory above the shared
@@ -2986,6 +3048,11 @@ total_data=%u (should be %u)\n", (unsigned int)total_data, (unsigned int)IVAL(pd
 	pdata = *ppdata;
 	data_end = pdata + max_data_bytes + DIR_ENTRY_SAFETY_MARGIN - 1;
 
+	/*
+	 * squash valgrind "writev(vector[...]) points to uninitialised byte(s)"
+	 * error.
+	 */
+	memset(pdata + total_data, 0, (max_data_bytes + DIR_ENTRY_SAFETY_MARGIN) - total_data);
 	/* Realloc the params space */
 	*pparams = (char *)SMB_REALLOC(*pparams, 6*SIZEOFWORD);
 	if(*pparams == NULL ) {
@@ -5528,7 +5595,8 @@ static void call_trans2qfilepathinfo(connection_struct *conn,
 	} else {
 		uint32_t name_hash;
 		char *fname = NULL;
-		uint32_t ucf_flags = 0;
+		uint32_t ucf_flags = (req->posix_pathnames ?
+				UCF_POSIX_PATHNAMES : 0);
 
 		/* qpathinfo */
 		if (total_params < 7) {
@@ -5552,9 +5620,25 @@ static void call_trans2qfilepathinfo(connection_struct *conn,
 			}
 		}
 
-		srvstr_get_path(req, params, req->flags2, &fname, &params[6],
+		if (req->posix_pathnames) {
+			srvstr_get_path_posix(req,
+				params,
+				req->flags2,
+				&fname,
+				&params[6],
 				total_params - 6,
-				STR_TERMINATE, &status);
+				STR_TERMINATE,
+				&status);
+		} else {
+			srvstr_get_path(req,
+				params,
+				req->flags2,
+				&fname,
+				&params[6],
+				total_params - 6,
+				STR_TERMINATE,
+				&status);
+		}
 		if (!NT_STATUS_IS_OK(status)) {
 			reply_nterror(req, status);
 			return;
@@ -6358,6 +6442,7 @@ static NTSTATUS smb_set_file_unix_hlink(connection_struct *conn,
 {
 	char *oldname = NULL;
 	struct smb_filename *smb_fname_old = NULL;
+	uint32_t ucf_flags = (req->posix_pathnames ? UCF_POSIX_PATHNAMES : 0);
 	TALLOC_CTX *ctx = talloc_tos();
 	NTSTATUS status = NT_STATUS_OK;
 
@@ -6366,8 +6451,25 @@ static NTSTATUS smb_set_file_unix_hlink(connection_struct *conn,
 		return NT_STATUS_INVALID_PARAMETER;
 	}
 
-	srvstr_get_path(ctx, pdata, req->flags2, &oldname, pdata,
-			total_data, STR_TERMINATE, &status);
+	if (req->posix_pathnames) {
+		srvstr_get_path_posix(ctx,
+			pdata,
+			req->flags2,
+			&oldname,
+			pdata,
+			total_data,
+			STR_TERMINATE,
+			&status);
+	} else {
+		srvstr_get_path(ctx,
+			pdata,
+			req->flags2,
+			&oldname,
+			pdata,
+			total_data,
+			STR_TERMINATE,
+			&status);
+	}
 	if (!NT_STATUS_IS_OK(status)) {
 		return status;
 	}
@@ -6379,7 +6481,7 @@ static NTSTATUS smb_set_file_unix_hlink(connection_struct *conn,
 				conn,
 				req->flags2 & FLAGS2_DFS_PATHNAMES,
 				oldname,
-				0,
+				ucf_flags,
 				NULL,
 				&smb_fname_old);
 	if (!NT_STATUS_IS_OK(status)) {
@@ -6405,6 +6507,8 @@ static NTSTATUS smb2_file_rename_information(connection_struct *conn,
 	uint32_t len;
 	char *newname = NULL;
 	struct smb_filename *smb_fname_dst = NULL;
+	uint32_t ucf_flags = UCF_SAVE_LCOMP |
+		(req->posix_pathnames ? UCF_POSIX_PATHNAMES : 0);
 	NTSTATUS status = NT_STATUS_OK;
 	TALLOC_CTX *ctx = talloc_tos();
 
@@ -6423,9 +6527,25 @@ static NTSTATUS smb2_file_rename_information(connection_struct *conn,
 		return NT_STATUS_INVALID_PARAMETER;
 	}
 
-	srvstr_get_path(ctx, pdata, req->flags2, &newname,
-				&pdata[20], len, STR_TERMINATE,
+	if (req->posix_pathnames) {
+		srvstr_get_path_posix(ctx,
+				pdata,
+				req->flags2,
+				&newname,
+				&pdata[20],
+				len,
+				STR_TERMINATE,
 				&status);
+	} else {
+		srvstr_get_path(ctx,
+				pdata,
+				req->flags2,
+				&newname,
+				&pdata[20],
+				len,
+				STR_TERMINATE,
+				&status);
+	}
 	if (!NT_STATUS_IS_OK(status)) {
 		return status;
 	}
@@ -6437,7 +6557,7 @@ static NTSTATUS smb2_file_rename_information(connection_struct *conn,
 				conn,
 				req->flags2 & FLAGS2_DFS_PATHNAMES,
 				newname,
-				UCF_SAVE_LCOMP,
+				ucf_flags,
 				NULL,
 				&smb_fname_dst);
 	if (!NT_STATUS_IS_OK(status)) {
@@ -6497,6 +6617,8 @@ static NTSTATUS smb_file_link_information(connection_struct *conn,
 	char *newname = NULL;
 	struct smb_filename *smb_fname_dst = NULL;
 	NTSTATUS status = NT_STATUS_OK;
+	uint32_t ucf_flags = UCF_SAVE_LCOMP |
+		(req->posix_pathnames ? UCF_POSIX_PATHNAMES : 0);
 	TALLOC_CTX *ctx = talloc_tos();
 
 	if (!fsp) {
@@ -6514,9 +6636,25 @@ static NTSTATUS smb_file_link_information(connection_struct *conn,
 		return NT_STATUS_INVALID_PARAMETER;
 	}
 
-	srvstr_get_path(ctx, pdata, req->flags2, &newname,
-				&pdata[20], len, STR_TERMINATE,
+	if (req->posix_pathnames) {
+		srvstr_get_path_posix(ctx,
+				pdata,
+				req->flags2,
+				&newname,
+				&pdata[20],
+				len,
+				STR_TERMINATE,
 				&status);
+	} else {
+		srvstr_get_path(ctx,
+				pdata,
+				req->flags2,
+				&newname,
+				&pdata[20],
+				len,
+				STR_TERMINATE,
+				&status);
+	}
 	if (!NT_STATUS_IS_OK(status)) {
 		return status;
 	}
@@ -6528,7 +6666,7 @@ static NTSTATUS smb_file_link_information(connection_struct *conn,
 				conn,
 				req->flags2 & FLAGS2_DFS_PATHNAMES,
 				newname,
-				UCF_SAVE_LCOMP,
+				ucf_flags,
 				NULL,
 				&smb_fname_dst);
 	if (!NT_STATUS_IS_OK(status)) {
@@ -6588,9 +6726,27 @@ static NTSTATUS smb_file_rename_information(connection_struct *conn,
 		return NT_STATUS_INVALID_PARAMETER;
 	}
 
-	srvstr_get_path_wcard(ctx, pdata, req->flags2, &newname, &pdata[12],
-			      len, 0, &status,
-			      &dest_has_wcard);
+	if (req->posix_pathnames) {
+		srvstr_get_path_wcard_posix(ctx,
+				pdata,
+				req->flags2,
+				&newname,
+				&pdata[12],
+				len,
+				0,
+				&status,
+				&dest_has_wcard);
+	} else {
+		srvstr_get_path_wcard(ctx,
+				pdata,
+				req->flags2,
+				&newname,
+				&pdata[12],
+				len,
+				0,
+				&status,
+				&dest_has_wcard);
+	}
 	if (!NT_STATUS_IS_OK(status)) {
 		return status;
 	}
@@ -8408,7 +8564,8 @@ static void call_trans2setfilepathinfo(connection_struct *conn,
 		}
 	} else {
 		char *fname = NULL;
-		uint32_t ucf_flags = 0;
+		uint32_t ucf_flags = (req->posix_pathnames ?
+			UCF_POSIX_PATHNAMES : 0);
 
 		/* set path info */
 		if (total_params < 7) {
@@ -8417,9 +8574,25 @@ static void call_trans2setfilepathinfo(connection_struct *conn,
 		}
 
 		info_level = SVAL(params,0);
-		srvstr_get_path(req, params, req->flags2, &fname, &params[6],
-				total_params - 6, STR_TERMINATE,
+		if (req->posix_pathnames) {
+			srvstr_get_path_posix(req,
+				params,
+				req->flags2,
+				&fname,
+				&params[6],
+				total_params - 6,
+				STR_TERMINATE,
 				&status);
+		} else {
+			srvstr_get_path(req,
+				params,
+				req->flags2,
+				&fname,
+				&params[6],
+				total_params - 6,
+				STR_TERMINATE,
+				&status);
+		}
 		if (!NT_STATUS_IS_OK(status)) {
 			reply_nterror(req, status);
 			return;
@@ -8542,6 +8715,7 @@ static void call_trans2mkdir(connection_struct *conn, struct smb_request *req,
 	char *directory = NULL;
 	NTSTATUS status = NT_STATUS_OK;
 	struct ea_list *ea_list = NULL;
+	uint32_t ucf_flags = (req->posix_pathnames ? UCF_POSIX_PATHNAMES : 0);
 	TALLOC_CTX *ctx = talloc_tos();
 
 	if (!CAN_WRITE(conn)) {
@@ -8554,9 +8728,25 @@ static void call_trans2mkdir(connection_struct *conn, struct smb_request *req,
 		return;
 	}
 
-	srvstr_get_path(ctx, params, req->flags2, &directory, &params[4],
-			total_params - 4, STR_TERMINATE,
+	if (req->posix_pathnames) {
+		srvstr_get_path_posix(ctx,
+			params,
+			req->flags2,
+			&directory,
+			&params[4],
+			total_params - 4,
+			STR_TERMINATE,
 			&status);
+	} else {
+		srvstr_get_path(ctx,
+			params,
+			req->flags2,
+			&directory,
+			&params[4],
+			total_params - 4,
+			STR_TERMINATE,
+			&status);
+	}
 	if (!NT_STATUS_IS_OK(status)) {
 		reply_nterror(req, status);
 		return;
@@ -8568,7 +8758,7 @@ static void call_trans2mkdir(connection_struct *conn, struct smb_request *req,
 				conn,
 				req->flags2 & FLAGS2_DFS_PATHNAMES,
 				directory,
-				0,
+				ucf_flags,
 				NULL,
 				&smb_dname);
 

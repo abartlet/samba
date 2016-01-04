@@ -17,15 +17,23 @@
    along with this program; if not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "includes.h"
+#include "replace.h"
 #include "system/filesys.h"
-#include "popt.h"
-#include "cmdline.h"
-#include "ctdb_client.h"
-#include "ctdb_private.h"
+#include "system/network.h"
 
-#include <sys/time.h>
-#include <time.h>
+#include <popt.h>
+#include <talloc.h>
+#include <tevent.h>
+
+#include "lib/util/time.h"
+#include "lib/util/debug.h"
+
+#include "ctdb_private.h"
+#include "ctdb_client.h"
+
+#include "common/cmdline.h"
+#include "common/common.h"
+#include "common/logging.h"
 
 static struct timeval tp1,tp2;
 
@@ -56,7 +64,7 @@ static int incr_func(struct ctdb_call_info *call)
 	if (call->record_data.dsize == 0) {
 		call->new_data = talloc(call, TDB_DATA);
 		if (call->new_data == NULL) {
-			return CTDB_ERR_NOMEM;
+			return ENOMEM;
 		}
 		call->new_data->dptr = talloc_size(call, 4);
 		call->new_data->dsize = 4;
@@ -121,7 +129,7 @@ static void send_start_messages(struct ctdb_context *ctdb, int incr)
 	ctdb_client_send_message(ctdb, dest, 0, data);
 }
 
-static void each_second(struct event_context *ev, struct timed_event *te,
+static void each_second(struct tevent_context *ev, struct tevent_timer *te,
 			struct timeval t, void *private_data)
 {
 	struct bench_data *bdata = talloc_get_type_abort(
@@ -141,18 +149,18 @@ static void each_second(struct event_context *ev, struct timed_event *te,
 //		printf("no messages recevied, try again to kickstart the ring in reverse direction...\n");
 		send_start_messages(bdata->ctdb, -1);
 	}
-	event_add_timed(bdata->ev, bdata, timeval_current_ofs(1, 0),
-			each_second, bdata);
+	tevent_add_timer(bdata->ev, bdata, timeval_current_ofs(1, 0),
+			 each_second, bdata);
 }
 
-static void dummy_event(struct event_context *ev, struct timed_event *te,
-					 struct timeval t, void *private_data)
+static void dummy_event(struct tevent_context *ev, struct tevent_timer *te,
+			struct timeval t, void *private_data)
 {
 	struct bench_data *bdata = talloc_get_type_abort(
 		private_data, struct bench_data);
 
-	event_add_timed(bdata->ev, bdata, timeval_current_ofs(1, 0),
-			dummy_event, bdata);
+	tevent_add_timer(bdata->ev, bdata, timeval_current_ofs(1, 0),
+			 dummy_event, bdata);
 }
 
 /*
@@ -163,11 +171,11 @@ static void bench_ring(struct bench_data *bdata)
 	int pnn = ctdb_get_pnn(bdata->ctdb);
 
 	if (pnn == 0) {
-		event_add_timed(bdata->ev, bdata, timeval_current_ofs(1, 0),
-				each_second, bdata);
+		tevent_add_timer(bdata->ev, bdata, timeval_current_ofs(1, 0),
+				 each_second, bdata);
 	} else {
-		event_add_timed(bdata->ev, bdata, timeval_current_ofs(1, 0),
-				dummy_event, bdata);
+		tevent_add_timer(bdata->ev, bdata, timeval_current_ofs(1, 0),
+				 dummy_event, bdata);
 	}
 
 	start_timer();
@@ -178,7 +186,7 @@ static void bench_ring(struct bench_data *bdata)
 			       bdata->msg_plus, bdata->msg_minus);
 			fflush(stdout);
 		}
-		event_loop_once(bdata->ev);
+		tevent_loop_once(bdata->ev);
 	}
 
 	printf("Ring: %.2f msgs/sec (+ve=%d -ve=%d)\n",
@@ -207,7 +215,7 @@ int main(int argc, const char *argv[])
 	int extra_argc = 0;
 	int ret;
 	poptContext pc;
-	struct event_context *ev;
+	struct tevent_context *ev;
 	struct bench_data *bdata;
 
 	pc = poptGetContext(argv[0], argc, argv, popt_options, POPT_CONTEXT_KEEP_FIRST);
@@ -233,7 +241,7 @@ int main(int argc, const char *argv[])
 		exit(1);
 	}
 
-	ev = event_context_init(NULL);
+	ev = tevent_context_init(NULL);
 
 	/* initialise ctdb */
 	ctdb = ctdb_cmdline_client(ev, timeval_current_ofs(3, 0));
@@ -274,7 +282,7 @@ int main(int argc, const char *argv[])
 		uint32_t recmode=1;
 		ctdb_ctrl_getrecmode(ctdb, ctdb, timeval_zero(), CTDB_CURRENT_NODE, &recmode);
 		if (recmode == 0) break;
-		event_loop_once(ev);
+		tevent_loop_once(ev);
 	}
 
 	bench_ring(bdata);

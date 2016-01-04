@@ -1,15 +1,13 @@
 # a waf tool to add extension based build patterns for Samba
 
-import Task
-from TaskGen import extension
-from samba_utils import *
+import Build
 from wafsamba import samba_version_file
 
 def write_version_header(task):
     '''print version.h contents'''
     src = task.inputs[0].srcpath(task.env)
 
-    version = samba_version_file(src, task.env.srcdir, env=task.env, is_install=task.env.is_install)
+    version = samba_version_file(src, task.env.srcdir, env=task.env, is_install=task.generator.bld.is_install)
     string = str(version)
 
     task.outputs[0].write(string)
@@ -27,7 +25,6 @@ def SAMBA_MKVERSION(bld, target):
                             source= 'VERSION',
                             target=target,
                             always=bld.is_install)
-    t.env.is_install = bld.is_install
 Build.BuildContext.SAMBA_MKVERSION = SAMBA_MKVERSION
 
 

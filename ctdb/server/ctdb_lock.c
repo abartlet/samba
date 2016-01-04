@@ -17,14 +17,23 @@
    You should have received a copy of the GNU General Public License
    along with this program; if not, see <http://www.gnu.org/licenses/>.
 */
-#include "includes.h"
-#include "include/ctdb_private.h"
-#include "include/ctdb_protocol.h"
-#include "tevent.h"
-#include "tdb.h"
-#include "lib/tdb_wrap/tdb_wrap.h"
+#include "replace.h"
 #include "system/filesys.h"
+#include "system/network.h"
+
+#include <talloc.h>
+#include <tevent.h>
+
+#include "lib/tdb_wrap/tdb_wrap.h"
 #include "lib/util/dlinklist.h"
+#include "lib/util/debug.h"
+#include "lib/util/samba_util.h"
+
+#include "ctdb_private.h"
+
+#include "common/system.h"
+#include "common/common.h"
+#include "common/logging.h"
 
 /*
  * Non-blocking Locking API
@@ -878,7 +887,7 @@ static void ctdb_lock_schedule(struct ctdb_context *ctdb)
 	lock_ctx->tfd = tevent_add_fd(ctdb->ev,
 				      lock_ctx,
 				      lock_ctx->fd[0],
-				      EVENT_FD_READ,
+				      TEVENT_FD_READ,
 				      ctdb_lock_handler,
 				      (void *)lock_ctx);
 	if (lock_ctx->tfd == NULL) {

@@ -133,7 +133,7 @@ bld.SAMBA3_LIBRARY('samba-passdb',
                    passdb/lookup_sid.h''',
                    abi_match=private_pdb_match,
                    abi_directory='passdb/ABI',
-                   vnum='0.24.1')
+                   vnum='0.24.2')
 
 bld.SAMBA3_SUBSYSTEM('pdb',
                    source='''passdb/pdb_get_set.c
@@ -255,13 +255,15 @@ bld.SAMBA3_SUBSYSTEM('samba3util',
                    lib/util_sid.c
                    lib/util_file.c
                    lib/util.c
+                   lib/util_path.c
+                   lib/util_procid.c
                    lib/util_sock.c
                    lib/util_tsock.c
                    lib/util_transfer_file.c
                    lib/sock_exec.c''',
                    deps='ndr LIBTSOCKET samba-security NDR_SECURITY samba-util util_tdb sys_rw iov_buf')
 
-if bld.CONFIG_GET("CTDB_CFLAGS") and bld.CONFIG_GET("CTDB_INCLUDE"):
+if bld.env.with_ctdb:
     SAMBA_CLUSTER_SUPPORT_SOURCES='''
                      lib/cluster_support.c
                      lib/dbwrap/dbwrap_ctdb.c
@@ -286,8 +288,6 @@ else:
 bld.SAMBA3_LIBRARY('samba-cluster-support',
                    source=SAMBA_CLUSTER_SUPPORT_SOURCES,
                    deps=SAMBA_CLUSTER_SUPPORT_DEPS,
-                   cflags=bld.CONFIG_GET("CTDB_CFLAGS"),
-                   includes=bld.CONFIG_GET("CTDB_INCLUDE"),
                    allow_undefined_symbols=True,
                    private_library=True)
 
@@ -299,7 +299,8 @@ bld.SAMBA3_SUBSYSTEM('TDB_LIB',
 
 bld.SAMBA3_LIBRARY('messages_dgm',
                    source='''lib/messages_dgm.c lib/messages_dgm_ref.c''',
-                   deps='talloc UNIX_MSG POLL_FUNCS_TEVENT samba-debug',
+                   deps='''talloc UNIX_MSG POLL_FUNCS_TEVENT samba-debug
+                           genrand''',
                    private_library=True)
 
 bld.SAMBA3_LIBRARY('messages_util',
@@ -858,7 +859,7 @@ bld.SAMBA3_SUBSYSTEM('LIBLSA',
 ########################## BINARIES #################################
 
 bld.SAMBA3_BINARY('smbd/smbd',
-                 source='smbd/server.c',
+                 source='smbd/server.c smbd/smbd_cleanupd.c',
                  deps='smbd_base EPMD LSASD FSSD MDSSD',
                  install_path='${SBINDIR}')
 
@@ -1071,7 +1072,8 @@ bld.SAMBA3_BINARY('client/smbclient',
                  msrpc3
                  RPC_NDR_SRVSVC
                  cli_smb_common
-                 ''' + bld.env['archive_lib'])
+		 archive
+                 ''')
 
 bld.SAMBA3_BINARY('net',
                  source='''utils/net.c
@@ -1186,13 +1188,6 @@ bld.SAMBA3_BINARY('testparm',
                  talloc
                  param
                  popt_samba3''')
-
-bld.SAMBA3_BINARY('smbta-util',
-                 source='utils/smbta-util.c',
-                 deps='''
-                 talloc
-                 secrets3
-                 param''')
 
 smbstatus_source = 'utils/status.c smbd/notify_msg.c'
 

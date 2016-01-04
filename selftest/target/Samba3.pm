@@ -172,6 +172,13 @@ sub setup_env($$$)
 	        return $self->{vars}->{$envname};
 	}
 
+	#
+	# Avoid hitting system krb5.conf -
+	# An env that needs Kerberos will reset this to the real
+	# value.
+	#
+	$ENV{KRB5_CONFIG} = "$path/no_krb5.conf";
+
 	if ($envname eq "nt4_dc") {
 		return $self->setup_nt4_dc("$path/nt4_dc");
 	} elsif ($envname eq "nt4_dc_schannel") {
@@ -587,6 +594,9 @@ sub setup_fileserver($$)
 	my $valid_users_sharedir="$share_dir/valid_users";
 	push(@dirs,$valid_users_sharedir);
 
+	my $offline_sharedir="$share_dir/offline";
+	push(@dirs,$offline_sharedir);
+
 	my $fileserver_options = "
 [lowercase]
 	path = $lower_case_share_dir
@@ -609,6 +619,9 @@ sub setup_fileserver($$)
 [valid-users-access]
 	path = $valid_users_sharedir
 	valid users = +userdup
+[offline]
+	path = $offline_sharedir
+	vfs objects = offline
 	";
 
 	my $vars = $self->provision($path,
@@ -856,6 +869,7 @@ sub check_or_start($$$$$) {
 		$ENV{NSS_WRAPPER_HOSTNAME} = $env_vars->{NSS_WRAPPER_HOSTNAME};
 		$ENV{NSS_WRAPPER_MODULE_SO_PATH} = $env_vars->{NSS_WRAPPER_MODULE_SO_PATH};
 		$ENV{NSS_WRAPPER_MODULE_FN_PREFIX} = $env_vars->{NSS_WRAPPER_MODULE_FN_PREFIX};
+		$ENV{UID_WRAPPER_ROOT} = "1";
 
 		$ENV{ENVNAME} = "$ENV{ENVNAME}.nmbd";
 
@@ -919,6 +933,7 @@ sub check_or_start($$$$$) {
 		} else {
 			$ENV{RESOLV_WRAPPER_HOSTS} = $env_vars->{RESOLV_WRAPPER_HOSTS};
 		}
+		$ENV{UID_WRAPPER_ROOT} = "1";
 
 		$ENV{ENVNAME} = "$ENV{ENVNAME}.winbindd";
 
@@ -982,6 +997,7 @@ sub check_or_start($$$$$) {
 		} else {
 			$ENV{RESOLV_WRAPPER_HOSTS} = $env_vars->{RESOLV_WRAPPER_HOSTS};
 		}
+		$ENV{UID_WRAPPER_ROOT} = "1";
 
 		$ENV{ENVNAME} = "$ENV{ENVNAME}.smbd";
 
@@ -1102,6 +1118,12 @@ sub provision($$$$$$$$)
 	my $manglenames_shrdir="$shrdir/manglenames";
 	push(@dirs,$manglenames_shrdir);
 
+	my $widelinks_shrdir="$shrdir/widelinks";
+	push(@dirs,$widelinks_shrdir);
+
+	my $widelinks_linkdir="$shrdir/widelinks_foo";
+	push(@dirs,$widelinks_linkdir);
+
 	# this gets autocreated by winbindd
 	my $wbsockdir="$prefix_abs/winbindd";
 	my $wbsockprivdir="$lockdir/winbindd_privileged";
@@ -1191,6 +1213,25 @@ sub provision($$$$$$$$)
         my $manglename_target = "$manglenames_shrdir/foo:bar";
 	mkdir($manglename_target, 0777);
 
+	##
+	## create symlinks for widelinks tests.
+	##
+	my $widelinks_target = "$widelinks_linkdir/target";
+	unless (open(WIDELINKS_TARGET, ">$widelinks_target")) {
+		warn("Unable to open $widelinks_target");
+		return undef;
+	}
+	close(WIDELINKS_TARGET);
+	chmod 0666, $widelinks_target;
+	##
+	## This link should get ACCESS_DENIED
+	##
+	symlink "$widelinks_target", "$widelinks_shrdir/source";
+	##
+	## This link should be allowed
+	##
+	symlink "$widelinks_shrdir", "$widelinks_shrdir/dot";
+
 	my $conffile="$libdir/server.conf";
 
 	my $nss_wrapper_pl = "$ENV{PERL} $self->{srcdir}/lib/nss_wrapper/nss_wrapper.pl";
@@ -1212,8 +1253,9 @@ sub provision($$$$$$$$)
 
 	my ($max_uid, $max_gid);
 	my ($uid_nobody, $uid_root, $uid_pdbtest, $uid_pdbtest2, $uid_userdup);
+	my ($uid_pdbtest_wkn);
 	my ($gid_nobody, $gid_nogroup, $gid_root, $gid_domusers, $gid_domadmins);
-	my ($gid_userdup);
+	my ($gid_userdup, $gid_everyone);
 
 	if ($unix_uid < 0xffff - 5) {
 		$max_uid = 0xffff;
@@ -1226,8 +1268,9 @@ sub provision($$$$$$$$)
 	$uid_pdbtest = $max_uid - 3;
 	$uid_pdbtest2 = $max_uid - 4;
 	$uid_userdup = $max_uid - 5;
+	$uid_pdbtest_wkn = $max_uid - 6;
 
-	if ($unix_gids[0] < 0xffff - 6) {
+	if ($unix_gids[0] < 0xffff - 7) {
 		$max_gid = 0xffff;
 	} else {
 		$max_gid = $unix_gids[0];
@@ -1239,6 +1282,7 @@ sub provision($$$$$$$$)
 	$gid_domusers = $max_gid - 4;
 	$gid_domadmins = $max_gid - 5;
 	$gid_userdup = $max_gid - 6;
+	$gid_everyone = $max_gid - 7;
 
 	##
 	## create conffile
@@ -1315,6 +1359,7 @@ sub provision($$$$$$$$)
 	create mask = 755
 	dos filemode = yes
 	strict rename = yes
+	strict sync = yes
 	vfs objects = acl_xattr fake_acls xattr_tdb streams_depot
 
 	printing = vlp
@@ -1381,8 +1426,14 @@ sub provision($$$$$$$$)
         force user = $unix_name
         guest ok = yes
 [forceuser_unixonly]
+	comment = force a user with unix user SID and group SID
 	path = $shrdir
 	force user = pdbtest
+	guest ok = yes
+[forceuser_wkngroup]
+	comment = force a user with well-known group SID
+	path = $shrdir
+	force user = pdbtest_wkn
 	guest ok = yes
 [forcegroup]
 	path = $shrdir
@@ -1486,6 +1537,11 @@ sub provision($$$$$$$$)
 	path = $shrdir/%R
 	guest ok = yes
 
+[widelinks_share]
+	path = $widelinks_shrdir
+	wide links = no
+	guest ok = yes
+
 [fsrvp_share]
 	path = $shrdir
 	comment = fake shapshots using rsync
@@ -1511,6 +1567,7 @@ $unix_name:x:$unix_uid:$unix_gids[0]:$unix_name gecos:$prefix_abs:/bin/false
 pdbtest:x:$uid_pdbtest:$gid_nogroup:pdbtest gecos:$prefix_abs:/bin/false
 pdbtest2:x:$uid_pdbtest2:$gid_nogroup:pdbtest gecos:$prefix_abs:/bin/false
 userdup:x:$uid_userdup:$gid_userdup:userdup gecos:$prefix_abs:/bin/false
+pdbtest_wkn:x:$uid_pdbtest_wkn:$gid_everyone:pdbtest_wkn gecos:$prefix_abs:/bin/false
 ";
 	if ($unix_uid != 0) {
 		print PASSWD "root:x:$uid_root:$gid_root:root gecos:$prefix_abs:/bin/false
@@ -1528,6 +1585,7 @@ $unix_name-group:x:$unix_gids[0]:
 domusers:X:$gid_domusers:
 domadmins:X:$gid_domadmins:
 userdup:x:$gid_userdup:$unix_name
+everyone:x:$gid_everyone:
 ";
 	if ($unix_gids[0] != 0) {
 		print GROUP "root:x:$gid_root:
@@ -1632,6 +1690,13 @@ userdup:x:$gid_userdup:$unix_name
 	$ret{LOCAL_PATH} = "$shrdir";
         $ret{LOGDIR} = $logdir;
 
+	#
+	# Avoid hitting system krb5.conf -
+	# An env that needs Kerberos will reset this to the real
+	# value.
+	#
+	$ret{KRB5_CONFIG} = abs_path($prefix) . "/no_krb5.conf";
+
 	return \%ret;
 }
 
@@ -1710,6 +1775,10 @@ sub wait_for_start($$$$$)
 	    return 1;
 	}
 	$ret = system(Samba::bindir_path($self, "net") ." $envvars->{CONFIGURATION} groupmap add rid=512 unixgroup=domadmins type=domain");
+	if ($ret != 0) {
+	    return 1;
+	}
+	$ret = system(Samba::bindir_path($self, "net") ." $envvars->{CONFIGURATION} groupmap add sid=S-1-1-0 unixgroup=everyone type=builtin");
 	if ($ret != 0) {
 	    return 1;
 	}

@@ -42,7 +42,6 @@ def set_options(opt):
     opt.SAMBA3_ADD_OPTION('cups', with_name="enable", without_name="disable")
     opt.SAMBA3_ADD_OPTION('iprint', with_name="enable", without_name="disable")
     opt.SAMBA3_ADD_OPTION('pam')
-    opt.SAMBA3_ADD_OPTION('pam_smbpass')
     opt.SAMBA3_ADD_OPTION('quotas')
     opt.SAMBA3_ADD_OPTION('sendfile-support')
     opt.SAMBA3_ADD_OPTION('utmp')
@@ -53,7 +52,6 @@ def set_options(opt):
     opt.SAMBA3_ADD_OPTION('dnsupdate')
     opt.SAMBA3_ADD_OPTION('syslog')
     opt.SAMBA3_ADD_OPTION('automount')
-    opt.SAMBA3_ADD_OPTION('aio-support')
     opt.SAMBA3_ADD_OPTION('dmapi', default=None) # None means autodetection
     opt.SAMBA3_ADD_OPTION('fam', default=None) # None means autodetection
     opt.SAMBA3_ADD_OPTION('profiling-data', default=False)
@@ -214,14 +212,14 @@ main() {
 
     # check for libarchive (tar command in smbclient)
     # None means autodetect, True/False means enable/disable
-    conf.env['archive_lib'] = ''
+    conf.SET_TARGET_TYPE('archive', 'EMPTY')
     if Options.options.with_libarchive is not False:
         libarchive_mandatory = Options.options.with_libarchive == True
         Logs.info("Checking for libarchive existence")
-        if conf.CHECK_BUNDLED_SYSTEM('libarchive', minversion='3.1.2'):
-            conf.env['archive_lib'] = 'libarchive'
+        if conf.CHECK_HEADERS('archive.h') and conf.CHECK_LIB('archive', shlib=True):
+            conf.CHECK_FUNCS_IN('archive_read_support_filter_all archive_read_free', 'archive')
         elif libarchive_mandatory:
-            conf.fatal('libarchive support requested, but no suitable pkgconfig found')
+            conf.fatal('libarchive support requested, but not found')
 
     # check for DMAPI libs
     if Options.options.with_dmapi == False:
@@ -547,27 +545,6 @@ return acl_get_perm_np(permset_d, perm);
 		'HAVE_OPENAT',
 		msg='Checking for openat',
 		headers='fcntl.h')
-
-    if Options.options.with_aio_support:
-        conf.CHECK_FUNCS_IN('aio_read', 'aio')
-        conf.CHECK_FUNCS_IN('aio_read', 'rt')
-        conf.CHECK_CODE('struct aiocb a; return aio_read(&a);',
-                        'HAVE_AIO',
-                        msg='Checking for asynchronous io support',
-                        headers='sys/types.h aio.h',
-                        lib='aio rt')
-        if conf.CONFIG_SET('HAVE_AIO'):
-            conf.CHECK_CODE('struct aiocb a; return aio_read(&a);', 'HAVE_AIO_READ', msg='Checking for aio_read', headers='aio.h', lib='aio rt')
-            conf.CHECK_CODE('struct aiocb a; return aio_write(&a);', 'HAVE_AIO_WRITE', msg='Checking for aio_write', headers='aio.h', lib='aio rt')
-            conf.CHECK_CODE('struct aiocb a; return aio_fsync(1, &a);', 'HAVE_AIO_FSYNC', msg='Checking for aio_fsync', headers='aio.h', lib='aio rt')
-            conf.CHECK_CODE('struct aiocb a; return aio_return(&a);', 'HAVE_AIO_RETURN', msg='Checking for aio_return', headers='aio.h', lib='aio rt')
-            conf.CHECK_CODE('struct aiocb a; return aio_error(&a);', 'HAVE_AIO_ERROR', msg='Checking for aio_error', headers='aio.h', lib='aio rt')
-            conf.CHECK_CODE('struct aiocb a; return aio_cancel(1, &a);', 'HAVE_AIO_CANCEL', msg='Checking for aio_cancel', headers='aio.h', lib='aio rt')
-            conf.CHECK_CODE('const struct aiocb * const a[1]; struct timespec t; return aio_suspend(a, 1, &t);', 'HAVE_AIO_SUSPEND', msg='Checking for aio_suspend', headers='aio.h', lib='aio rt')
-        if not conf.CONFIG_SET('HAVE_AIO'):
-            conf.DEFINE('HAVE_NO_AIO', '1')
-    else:
-        conf.DEFINE('HAVE_NO_AIO', '1')
 
     if host_os.rfind('linux') > -1:
 	conf.CHECK_FUNCS_IN('io_submit', 'aio')
@@ -965,9 +942,6 @@ int i; i = PAM_RADIO_TYPE;
         if use_pam:
             conf.DEFINE('WITH_PAM', 1)
             conf.DEFINE('WITH_PAM_MODULES', 1)
-
-    if Options.options.with_pam_smbpass:
-        conf.env.with_pam_smbpass = True
 
     seteuid = False
 
@@ -1488,9 +1462,8 @@ main() {
         conf.env.with_ctdb = False
     else:
         Logs.info("building with cluster support")
-        conf.env['CTDB_CFLAGS'] = '-DCLUSTER_SUPPORT=1'
-        conf.env['CTDB_INCLUDE'] = conf.srcdir + '/ctdb/include'
         conf.env.with_ctdb = True
+        conf.DEFINE('CLUSTER_SUPPORT', 1)
 
     conf.CHECK_CODE('void seekdir(DIR *d, long loc) { return; }',
                     'SEEKDIR_RETURNS_VOID',
@@ -1601,10 +1574,10 @@ main() {
                                       vfs_expand_msdfs vfs_shadow_copy vfs_shadow_copy2
                                       vfs_readahead vfs_xattr_tdb vfs_posix_eadb
                                       vfs_streams_xattr vfs_streams_depot vfs_acl_xattr vfs_acl_tdb
-                                      vfs_smb_traffic_analyzer vfs_preopen vfs_catia
+                                      vfs_preopen vfs_catia
                                       vfs_media_harmony vfs_unityed_media vfs_fruit vfs_shell_snap
                                       vfs_commit vfs_worm vfs_crossrename vfs_linux_xfs_sgid
-                                      vfs_time_audit
+                                      vfs_time_audit vfs_offline
                                   '''))
     default_shared_modules.extend(TO_LIST('auth_script idmap_tdb2 idmap_script'))
     # these have broken dependencies
@@ -1637,9 +1610,6 @@ main() {
 
     if Options.options.with_pthreadpool:
         default_shared_modules.extend(TO_LIST('vfs_aio_pthread'))
-
-    if conf.CONFIG_SET('HAVE_AIO'):
-        default_shared_modules.extend(TO_LIST('vfs_aio_posix'))
 
     if conf.CONFIG_SET('HAVE_LINUX_KERNEL_AIO'):
         default_shared_modules.extend(TO_LIST('vfs_aio_linux'))

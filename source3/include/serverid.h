@@ -20,7 +20,7 @@
 #ifndef __SERVERID_H__
 #define __SERVERID_H__
 
-#include "includes.h"
+#include "replace.h"
 #include "lib/dbwrap/dbwrap.h"
 
 /*
@@ -58,11 +58,5 @@ bool serverid_traverse_read(int (*fn)(const struct server_id *id,
  * Ensure CLEAR_IF_FIRST works fine, to be called from the parent smbd
  */
 bool serverid_parent_init(TALLOC_CTX *mem_ctx);
-
-/*
- * Get a random unique_id and make sure that it is not
- * SERVERID_UNIQUE_ID_NOT_TO_VERIFY
- */
-uint64_t serverid_get_random_unique_id(void);
 
 #endif

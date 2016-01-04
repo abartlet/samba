@@ -20,6 +20,8 @@
 #ifndef __CTDB_PROTOCOL_API_H__
 #define __CTDB_PROTOCOL_API_H__
 
+#include <talloc.h>
+
 #include "protocol/protocol.h"
 
 /* From protocol/protocol_types.c */
@@ -28,6 +30,8 @@ size_t ctdb_ltdb_header_len(struct ctdb_ltdb_header *header);
 void ctdb_ltdb_header_push(struct ctdb_ltdb_header *header, uint8_t *buf);
 int ctdb_ltdb_header_pull(uint8_t *buf, size_t buflen,
 			  struct ctdb_ltdb_header *header);
+
+int ctdb_ltdb_header_extract(TDB_DATA *data, struct ctdb_ltdb_header *header);
 
 size_t ctdb_rec_data_len(struct ctdb_rec_data *rec);
 void ctdb_rec_data_push(struct ctdb_rec_data *rec, uint8_t *buf);
@@ -659,5 +663,7 @@ enum ctdb_runstate ctdb_runstate_from_string(const char *runstate_str);
 
 const char *ctdb_event_to_string(enum ctdb_event event);
 enum ctdb_event ctdb_event_from_string(const char *event_str);
+
+const char *ctdb_sock_addr_to_string(TALLOC_CTX *mem_ctx, ctdb_sock_addr *addr);
 
 #endif /* __CTDB_PROTOCOL_API_H__ */

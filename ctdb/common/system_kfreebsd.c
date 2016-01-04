@@ -23,16 +23,22 @@
   needs, and inspired by 'common/system_aix.c' for the pcap usage.
 */
 
-#include "includes.h"
+#include "replace.h"
 #include "system/network.h"
 #include "system/filesys.h"
 #include "system/wait.h"
-#include "../include/ctdb_private.h"
+
+#include "lib/util/debug.h"
+
+#include "protocol/protocol.h"
+
 #include <net/ethernet.h>
 #include <netinet/ip6.h>
 #include <net/if_arp.h>
 #include <pcap.h>
 
+#include "common/logging.h"
+#include "common/system.h"
 
 #ifndef ETHERTYPE_IP6
 #define ETHERTYPE_IP6 0x86dd
@@ -74,7 +80,7 @@ static uint16_t tcp_checksum6(uint16_t *data, size_t n, struct ip6_hdr *ip6)
  */
 int ctdb_sys_send_arp(const ctdb_sock_addr *addr, const char *iface)
 {
-	/* FIXME kFreeBSD: We dont do gratuitous arp yet */
+	/* FIXME kFreeBSD: We don't do gratuitous arp yet */
 	return -1;
 }
 
@@ -209,7 +215,7 @@ int ctdb_sys_send_tcp(const ctdb_sock_addr *dest,
 			return -1;
 
 		}
-		/* sendto() dont like if the port is set and the socket is
+		/* sendto() don't like if the port is set and the socket is
 		   in raw mode.
 		*/
 		tmpdest = discard_const(dest);
@@ -361,10 +367,4 @@ int ctdb_get_peer_pid(const int fd, pid_t *peer_pid)
 {
 	/* FIXME kFreeBSD: get_peer_pid not implemented */
 	return 1;
-}
-
-int ctdb_set_process_name(const char *name)
-{
-	/* FIXME kFreeBSD: set_process_name not implemented */
-	return -ENOSYS;
 }

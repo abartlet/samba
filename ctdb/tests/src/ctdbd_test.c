@@ -20,8 +20,14 @@
 #ifndef _CTDBD_TEST_C
 #define _CTDBD_TEST_C
 
-#include "includes.h"
-#include "tdb.h"
+#include "replace.h"
+#include "system/network.h"
+
+#include <talloc.h>
+/* Allow use of deprecated function tevent_loop_allow_nesting() */
+#define TEVENT_DEPRECATED
+#include <tevent.h>
+
 #include "ctdb_private.h"
 
 /*
@@ -39,10 +45,8 @@ bool fast_start;
 #include "common/srvid.c"
 #include "common/cmdline.c"
 #include "common/rb_tree.c"
-#include "common/ctdb_logging.c"
-#include "common/ctdb_fork.c"
-#include "common/system_util.c"
 #include "common/reqid.c"
+#include "common/logging.c"
 
 /* CTDB_SERVER_OBJ */
 #include "server/ctdb_daemon.c"
@@ -70,6 +74,7 @@ bool fast_start;
 #include "server/ctdb_statistics.c"
 #include "server/ctdb_update_record.c"
 #include "server/ctdb_lock.c"
+#include "server/ctdb_fork.c"
 
 /* CTDB_CLIENT_OBJ */
 #include "client/ctdb_client.c"

@@ -19,11 +19,15 @@
 */
 
 
-#include "includes.h"
+#include "replace.h"
 #include "system/network.h"
 #include "system/filesys.h"
 #include "system/wait.h"
-#include "../include/ctdb_private.h"
+
+#include "lib/util/debug.h"
+
+#include "protocol/protocol.h"
+
 #include <netinet/if_ether.h>
 #include <netinet/ip6.h>
 #include <net/if_arp.h>
@@ -31,6 +35,8 @@
 #include <sys/kinfo.h>
 #include <pcap.h>
 
+#include "common/logging.h"
+#include "common/system.h"
 
 
 #if 0
@@ -206,7 +212,7 @@ int ctdb_sys_close_capture_socket(void *private_data)
  */
 int ctdb_sys_send_arp(const ctdb_sock_addr *addr, const char *iface)
 {
-	/* FIXME AIX: We dont do gratuitous arp yet */
+	/* FIXME AIX: We don't do gratuitous arp yet */
 	return -1;
 }
 
@@ -372,10 +378,4 @@ int ctdb_get_peer_pid(const int fd, pid_t *peer_pid)
 		*peer_pid = cr.pid;
 	}
 	return ret;
-}
-
-int ctdb_set_process_name(const char *name)
-{
-	/* FIXME AIX: set_process_name not implemented */
-	return -ENOSYS;
 }

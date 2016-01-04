@@ -18,6 +18,7 @@
 */
 
 #include <replace.h>
+#include <system/locale.h>
 
 #include "common/logging.h"
 
@@ -36,9 +37,19 @@ bool debug_level_parse(const char *log_string, enum debug_level *log_level)
 {
 	int i;
 
-	for (i=0; ARRAY_SIZE(log_string_map); i++) {
-		if (strcasecmp(log_string_map[i].log_string,
-			       log_string) == 0) {
+	if (isdigit(log_string[0])) {
+		int level = atoi(log_string);
+
+		if (level >= 0 && level < ARRAY_SIZE(log_string_map)) {
+			*log_level = debug_level_from_int(level);
+			return true;
+		}
+		return false;
+	}
+
+	for (i=0; i<ARRAY_SIZE(log_string_map); i++) {
+		if (strncasecmp(log_string_map[i].log_string,
+				log_string, strlen(log_string)) == 0) {
 			*log_level = log_string_map[i].log_level;
 			return true;
 		}
@@ -71,4 +82,22 @@ enum debug_level debug_level_from_string(const char *log_string)
 
 	/* Default debug level */
 	return DEBUG_ERR;
+}
+
+int debug_level_to_int(enum debug_level log_level)
+{
+	return (int)log_level;
+}
+
+enum debug_level debug_level_from_int(int level)
+{
+	enum debug_level log_level;
+
+	if (level >= 0 && level < ARRAY_SIZE(log_string_map)) {
+		log_level = log_string_map[level].log_level;
+	} else {
+		log_level = DEBUG_ERR;
+	}
+
+	return log_level;
 }

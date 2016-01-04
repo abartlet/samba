@@ -17,16 +17,28 @@
    You should have received a copy of the GNU General Public License
    along with this program; if not, see <http://www.gnu.org/licenses/>.
 */
-#include "includes.h"
-#include "tdb.h"
+#include "replace.h"
 #include "system/time.h"
 #include "system/network.h"
 #include "system/filesys.h"
 #include "system/wait.h"
-#include "../include/ctdb_private.h"
-#include "lib/util/dlinklist.h"
-#include "lib/tdb_wrap/tdb_wrap.h"
 
+#include <talloc.h>
+#include <tevent.h>
+#include <tdb.h>
+
+#include "lib/tdb_wrap/tdb_wrap.h"
+#include "lib/util/dlinklist.h"
+#include "lib/util/debug.h"
+#include "lib/util/samba_util.h"
+#include "lib/util/util_process.h"
+
+#include "ctdb_private.h"
+#include "ctdb_client.h"
+
+#include "common/system.h"
+#include "common/common.h"
+#include "common/logging.h"
 
 int 
 ctdb_control_getvnnmap(struct ctdb_context *ctdb, uint32_t opcode, TDB_DATA indata, TDB_DATA *outdata)
@@ -80,7 +92,7 @@ ctdb_control_getdbmap(struct ctdb_context *ctdb, uint32_t opcode, TDB_DATA indat
 {
 	uint32_t i, len;
 	struct ctdb_db_context *ctdb_db;
-	struct ctdb_dbid_map *dbid_map;
+	struct ctdb_dbid_map_old *dbid_map;
 
 	CHECK_CONTROL_DATA_SIZE(0);
 
@@ -90,17 +102,17 @@ ctdb_control_getdbmap(struct ctdb_context *ctdb, uint32_t opcode, TDB_DATA indat
 	}
 
 
-	outdata->dsize = offsetof(struct ctdb_dbid_map, dbs) + sizeof(dbid_map->dbs[0])*len;
+	outdata->dsize = offsetof(struct ctdb_dbid_map_old, dbs) + sizeof(dbid_map->dbs[0])*len;
 	outdata->dptr  = (unsigned char *)talloc_zero_size(outdata, outdata->dsize);
 	if (!outdata->dptr) {
 		DEBUG(DEBUG_ALERT, (__location__ " Failed to allocate dbmap array\n"));
 		exit(1);
 	}
 
-	dbid_map = (struct ctdb_dbid_map *)outdata->dptr;
+	dbid_map = (struct ctdb_dbid_map_old *)outdata->dptr;
 	dbid_map->num = len;
 	for (i=0,ctdb_db=ctdb->db_list;ctdb_db;i++,ctdb_db=ctdb_db->next){
-		dbid_map->dbs[i].dbid       = ctdb_db->db_id;
+		dbid_map->dbs[i].db_id       = ctdb_db->db_id;
 		if (ctdb_db->persistent != 0) {
 			dbid_map->dbs[i].flags |= CTDB_DB_FLAGS_PERSISTENT;
 		}
@@ -200,7 +212,7 @@ struct pulldb_data {
 static int traverse_pulldb(struct tdb_context *tdb, TDB_DATA key, TDB_DATA data, void *p)
 {
 	struct pulldb_data *params = (struct pulldb_data *)p;
-	struct ctdb_rec_data *rec;
+	struct ctdb_rec_data_old *rec;
 	struct ctdb_context *ctdb = params->ctdb;
 	struct ctdb_db_context *ctdb_db = params->ctdb_db;
 
@@ -236,12 +248,12 @@ static int traverse_pulldb(struct tdb_context *tdb, TDB_DATA key, TDB_DATA data,
  */
 int32_t ctdb_control_pull_db(struct ctdb_context *ctdb, TDB_DATA indata, TDB_DATA *outdata)
 {
-	struct ctdb_control_pulldb *pull;
+	struct ctdb_pulldb *pull;
 	struct ctdb_db_context *ctdb_db;
 	struct pulldb_data params;
 	struct ctdb_marshall_buffer *reply;
 
-	pull = (struct ctdb_control_pulldb *)indata.dptr;
+	pull = (struct ctdb_pulldb *)indata.dptr;
 
 	ctdb_db = find_ctdb_db(ctdb, pull->db_id);
 	if (!ctdb_db) {
@@ -309,7 +321,7 @@ int32_t ctdb_control_push_db(struct ctdb_context *ctdb, TDB_DATA indata)
 	struct ctdb_marshall_buffer *reply = (struct ctdb_marshall_buffer *)indata.dptr;
 	struct ctdb_db_context *ctdb_db;
 	int i, ret;
-	struct ctdb_rec_data *rec;
+	struct ctdb_rec_data_old *rec;
 
 	if (indata.dsize < offsetof(struct ctdb_marshall_buffer, data)) {
 		DEBUG(DEBUG_ERR,(__location__ " invalid data in pulldb reply\n"));
@@ -333,7 +345,7 @@ int32_t ctdb_control_push_db(struct ctdb_context *ctdb, TDB_DATA indata)
 		return -1;
 	}
 
-	rec = (struct ctdb_rec_data *)&reply->data[0];
+	rec = (struct ctdb_rec_data_old *)&reply->data[0];
 
 	DEBUG(DEBUG_INFO,("starting push of %u records for dbid 0x%x\n",
 		 reply->count, reply->db_id));
@@ -366,7 +378,7 @@ int32_t ctdb_control_push_db(struct ctdb_context *ctdb, TDB_DATA indata)
 			goto failed;
 		}
 
-		rec = (struct ctdb_rec_data *)(rec->length + (uint8_t *)rec);
+		rec = (struct ctdb_rec_data_old *)(rec->length + (uint8_t *)rec);
 	}	    
 
 	DEBUG(DEBUG_DEBUG,("finished push of %u records for dbid 0x%x\n",
@@ -397,11 +409,11 @@ failed:
 
 struct ctdb_set_recmode_state {
 	struct ctdb_context *ctdb;
-	struct ctdb_req_control *c;
+	struct ctdb_req_control_old *c;
 	uint32_t recmode;
 	int fd[2];
-	struct timed_event *te;
-	struct fd_event *fde;
+	struct tevent_timer *te;
+	struct tevent_fd *fde;
 	pid_t child;
 	struct timeval start_time;
 };
@@ -410,8 +422,9 @@ struct ctdb_set_recmode_state {
   called if our set_recmode child times out. this would happen if
   ctdb_recovery_lock() would block.
  */
-static void ctdb_set_recmode_timeout(struct event_context *ev, struct timed_event *te, 
-					 struct timeval t, void *private_data)
+static void ctdb_set_recmode_timeout(struct tevent_context *ev,
+				     struct tevent_timer *te,
+				     struct timeval t, void *private_data)
 {
 	struct ctdb_set_recmode_state *state = talloc_get_type(private_data, 
 					   struct ctdb_set_recmode_state);
@@ -449,8 +462,9 @@ static int set_recmode_destructor(struct ctdb_set_recmode_state *state)
 /* this is called when the client process has completed ctdb_recovery_lock()
    and has written data back to us through the pipe.
 */
-static void set_recmode_handler(struct event_context *ev, struct fd_event *fde, 
-			     uint16_t flags, void *private_data)
+static void set_recmode_handler(struct tevent_context *ev,
+				struct tevent_fd *fde,
+				uint16_t flags, void *private_data)
 {
 	struct ctdb_set_recmode_state *state= talloc_get_type(private_data, 
 					     struct ctdb_set_recmode_state);
@@ -492,8 +506,8 @@ static void set_recmode_handler(struct event_context *ev, struct fd_event *fde,
 }
 
 static void
-ctdb_drop_all_ips_event(struct event_context *ev, struct timed_event *te, 
-			       struct timeval t, void *private_data)
+ctdb_drop_all_ips_event(struct tevent_context *ev, struct tevent_timer *te,
+			struct timeval t, void *private_data)
 {
 	struct ctdb_context *ctdb = talloc_get_type(private_data, struct ctdb_context);
 
@@ -516,7 +530,9 @@ int ctdb_deferred_drop_all_ips(struct ctdb_context *ctdb)
 	ctdb->release_ips_ctx = talloc_new(ctdb);
 	CTDB_NO_MEMORY(ctdb, ctdb->release_ips_ctx);
 
-	event_add_timed(ctdb->ev, ctdb->release_ips_ctx, timeval_current_ofs(ctdb->tunable.recovery_drop_all_ips, 0), ctdb_drop_all_ips_event, ctdb);
+	tevent_add_timer(ctdb->ev, ctdb->release_ips_ctx,
+			 timeval_current_ofs(ctdb->tunable.recovery_drop_all_ips, 0),
+			 ctdb_drop_all_ips_event, ctdb);
 	return 0;
 }
 
@@ -524,7 +540,7 @@ int ctdb_deferred_drop_all_ips(struct ctdb_context *ctdb)
   set the recovery mode
  */
 int32_t ctdb_control_set_recmode(struct ctdb_context *ctdb, 
-				 struct ctdb_req_control *c,
+				 struct ctdb_req_control_old *c,
 				 TDB_DATA indata, bool *async_reply,
 				 const char **errormsg)
 {
@@ -618,7 +634,7 @@ int32_t ctdb_control_set_recmode(struct ctdb_context *ctdb,
 		char cc = 0;
 		close(state->fd[0]);
 
-		ctdb_set_process_name("ctdb_recmode");
+		prctl_set_comment("ctdb_recmode");
 		debug_extra = talloc_asprintf(NULL, "set_recmode:");
 		/* Daemon should not be able to get the recover lock,
 		 * as it should be held by the recovery master */
@@ -647,13 +663,11 @@ int32_t ctdb_control_set_recmode(struct ctdb_context *ctdb,
 
 	DEBUG(DEBUG_DEBUG, (__location__ " Created PIPE FD:%d for setrecmode\n", state->fd[0]));
 
-	state->te = event_add_timed(ctdb->ev, state, timeval_current_ofs(5, 0),
-				    ctdb_set_recmode_timeout, state);
+	state->te = tevent_add_timer(ctdb->ev, state, timeval_current_ofs(5, 0),
+				     ctdb_set_recmode_timeout, state);
 
-	state->fde = event_add_fd(ctdb->ev, state, state->fd[0],
-				EVENT_FD_READ,
-				set_recmode_handler,
-				(void *)state);
+	state->fde = tevent_add_fd(ctdb->ev, state, state->fd[0], TEVENT_FD_READ,
+				   set_recmode_handler, (void *)state);
 
 	if (state->fde == NULL) {
 		talloc_free(state);
@@ -739,7 +753,7 @@ void ctdb_recovery_unlock(struct ctdb_context *ctdb)
   when the function returns)
   or !0 is the record still exists in the tdb after returning.
  */
-static int delete_tdb_record(struct ctdb_context *ctdb, struct ctdb_db_context *ctdb_db, struct ctdb_rec_data *rec)
+static int delete_tdb_record(struct ctdb_context *ctdb, struct ctdb_db_context *ctdb_db, struct ctdb_rec_data_old *rec)
 {
 	TDB_DATA key, data, data2;
 	struct ctdb_ltdb_header *hdr, *hdr2;
@@ -845,7 +859,7 @@ static int delete_tdb_record(struct ctdb_context *ctdb, struct ctdb_db_context *
 
 
 struct recovery_callback_state {
-	struct ctdb_req_control *c;
+	struct ctdb_req_control_old *c;
 };
 
 
@@ -880,7 +894,7 @@ static void ctdb_end_recovery_callback(struct ctdb_context *ctdb, int status, vo
   recovery has finished
  */
 int32_t ctdb_control_end_recovery(struct ctdb_context *ctdb, 
-				struct ctdb_req_control *c,
+				struct ctdb_req_control_old *c,
 				bool *async_reply)
 {
 	int ret;
@@ -935,7 +949,7 @@ static void ctdb_start_recovery_callback(struct ctdb_context *ctdb, int status, 
   run the startrecovery eventscript
  */
 int32_t ctdb_control_start_recovery(struct ctdb_context *ctdb, 
-				struct ctdb_req_control *c,
+				struct ctdb_req_control_old *c,
 				bool *async_reply)
 {
 	int ret;
@@ -977,7 +991,7 @@ int32_t ctdb_control_try_delete_records(struct ctdb_context *ctdb, TDB_DATA inda
 	struct ctdb_marshall_buffer *reply = (struct ctdb_marshall_buffer *)indata.dptr;
 	struct ctdb_db_context *ctdb_db;
 	int i;
-	struct ctdb_rec_data *rec;
+	struct ctdb_rec_data_old *rec;
 	struct ctdb_marshall_buffer *records;
 
 	if (indata.dsize < offsetof(struct ctdb_marshall_buffer, data)) {
@@ -1007,7 +1021,7 @@ int32_t ctdb_control_try_delete_records(struct ctdb_context *ctdb, TDB_DATA inda
 	records->db_id = ctdb_db->db_id;
 
 
-	rec = (struct ctdb_rec_data *)&reply->data[0];
+	rec = (struct ctdb_rec_data_old *)&reply->data[0];
 	for (i=0;i<reply->count;i++) {
 		TDB_DATA key, data;
 
@@ -1044,7 +1058,7 @@ int32_t ctdb_control_try_delete_records(struct ctdb_context *ctdb, TDB_DATA inda
 			memcpy(old_size+(uint8_t *)records, rec, rec->length);
 		} 
 
-		rec = (struct ctdb_rec_data *)(rec->length + (uint8_t *)rec);
+		rec = (struct ctdb_rec_data_old *)(rec->length + (uint8_t *)rec);
 	}	    
 
 
@@ -1069,7 +1083,7 @@ int32_t ctdb_control_try_delete_records(struct ctdb_context *ctdb, TDB_DATA inda
  */
 static int store_tdb_record(struct ctdb_context *ctdb,
 			    struct ctdb_db_context *ctdb_db,
-			    struct ctdb_rec_data *rec)
+			    struct ctdb_rec_data_old *rec)
 {
 	TDB_DATA key, data, data2;
 	struct ctdb_ltdb_header *hdr, *hdr2;
@@ -1169,7 +1183,7 @@ int32_t ctdb_control_receive_records(struct ctdb_context *ctdb,
 	struct ctdb_marshall_buffer *reply = (struct ctdb_marshall_buffer *)indata.dptr;
 	struct ctdb_db_context *ctdb_db;
 	int i;
-	struct ctdb_rec_data *rec;
+	struct ctdb_rec_data_old *rec;
 	struct ctdb_marshall_buffer *records;
 
 	if (indata.dsize < offsetof(struct ctdb_marshall_buffer, data)) {
@@ -1198,7 +1212,7 @@ int32_t ctdb_control_receive_records(struct ctdb_context *ctdb,
 	}
 	records->db_id = ctdb_db->db_id;
 
-	rec = (struct ctdb_rec_data *)&reply->data[0];
+	rec = (struct ctdb_rec_data_old *)&reply->data[0];
 	for (i=0; i<reply->count; i++) {
 		TDB_DATA key, data;
 
@@ -1242,7 +1256,7 @@ int32_t ctdb_control_receive_records(struct ctdb_context *ctdb,
 			memcpy(old_size+(uint8_t *)records, rec, rec->length);
 		}
 
-		rec = (struct ctdb_rec_data *)(rec->length + (uint8_t *)rec);
+		rec = (struct ctdb_rec_data_old *)(rec->length + (uint8_t *)rec);
 	}
 
 	*outdata = ctdb_marshall_finish(records);
@@ -1272,7 +1286,9 @@ int32_t ctdb_control_get_capabilities(struct ctdb_context *ctdb, TDB_DATA *outda
    If we havent been pinged for a while we assume the recovery
    daemon is inoperable and we restart.
 */
-static void ctdb_recd_ping_timeout(struct event_context *ev, struct timed_event *te, struct timeval t, void *p)
+static void ctdb_recd_ping_timeout(struct tevent_context *ev,
+				   struct tevent_timer *te,
+				   struct timeval t, void *p)
 {
 	struct ctdb_context *ctdb = talloc_get_type(p, struct ctdb_context);
 	uint32_t *count = talloc_get_type(ctdb->recd_ping_count, uint32_t);
@@ -1281,9 +1297,9 @@ static void ctdb_recd_ping_timeout(struct event_context *ev, struct timed_event 
 
 	if (*count < ctdb->tunable.recd_ping_failcount) {
 		(*count)++;
-		event_add_timed(ctdb->ev, ctdb->recd_ping_count, 
-			timeval_current_ofs(ctdb->tunable.recd_ping_timeout, 0),
-			ctdb_recd_ping_timeout, ctdb);
+		tevent_add_timer(ctdb->ev, ctdb->recd_ping_count,
+				 timeval_current_ofs(ctdb->tunable.recd_ping_timeout, 0),
+				 ctdb_recd_ping_timeout, ctdb);
 		return;
 	}
 
@@ -1301,9 +1317,9 @@ int32_t ctdb_control_recd_ping(struct ctdb_context *ctdb)
 	CTDB_NO_MEMORY(ctdb, ctdb->recd_ping_count);
 
 	if (ctdb->tunable.recd_ping_timeout != 0) {
-		event_add_timed(ctdb->ev, ctdb->recd_ping_count, 
-			timeval_current_ofs(ctdb->tunable.recd_ping_timeout, 0),
-			ctdb_recd_ping_timeout, ctdb);
+		tevent_add_timer(ctdb->ev, ctdb->recd_ping_count,
+				 timeval_current_ofs(ctdb->tunable.recd_ping_timeout, 0),
+				 ctdb_recd_ping_timeout, ctdb);
 	}
 
 	return 0;

@@ -30,7 +30,6 @@
 
 /* paths to these include files come from --with-ctdb= in configure */
 
-#include "ctdb.h"
 #include "ctdb_private.h"
 
 struct ctdbd_srvid_cb {
@@ -136,18 +135,18 @@ int register_with_ctdbd(struct ctdbd_connection *conn, uint64_t srvid,
 }
 
 static int ctdbd_msg_call_back(struct ctdbd_connection *conn,
-			       struct ctdb_req_message *msg)
+			       struct ctdb_req_message_old *msg)
 {
 	size_t msg_len;
 	size_t i, num_callbacks;
 
 	msg_len = msg->hdr.length;
-	if (msg_len < offsetof(struct ctdb_req_message, data)) {
+	if (msg_len < offsetof(struct ctdb_req_message_old, data)) {
 		DEBUG(10, ("%s: len %u too small\n", __func__,
 			   (unsigned)msg_len));
 		return 0;
 	}
-	msg_len -= offsetof(struct ctdb_req_message, data);
+	msg_len -= offsetof(struct ctdb_req_message_old, data);
 
 	if (msg_len < msg->datalen) {
 		DEBUG(10, ("%s: msg_len=%u < msg->datalen=%u\n", __func__,
@@ -199,7 +198,7 @@ static bool ctdbd_working(struct ctdbd_connection *conn, uint32_t vnn)
 {
 	int32_t cstatus=-1;
 	TDB_DATA outdata;
-	struct ctdb_node_map *m;
+	struct ctdb_node_map_old *m;
 	uint32_t failure_flags;
 	bool ok = false;
 	int i, ret;
@@ -216,7 +215,7 @@ static bool ctdbd_working(struct ctdbd_connection *conn, uint32_t vnn)
 		return false;
 	}
 
-	m = (struct ctdb_node_map *)outdata.dptr;
+	m = (struct ctdb_node_map_old *)outdata.dptr;
 
 	for (i=0; i<m->num; i++) {
 		if (vnn == m->nodes[i].pnn) {
@@ -371,7 +370,7 @@ static int ctdb_read_req(struct ctdbd_connection *conn, uint32_t reqid,
 	ctdb_packet_dump(hdr);
 
 	if (hdr->operation == CTDB_REQ_MESSAGE) {
-		struct ctdb_req_message *msg = (struct ctdb_req_message *)hdr;
+		struct ctdb_req_message_old *msg = (struct ctdb_req_message_old *)hdr;
 
 		if (conn->msg_ctx == NULL) {
 			DEBUG(1, ("Got a message without having a msg ctx, "
@@ -431,7 +430,7 @@ static int ctdbd_init_connection(TALLOC_CTX *mem_ctx,
 
 	conn->sockname = talloc_strdup(conn, sockname);
 	if (conn->sockname == NULL) {
-		DBG_ERR("%s: talloc failed\n", __func__);
+		DBG_ERR("talloc failed\n");
 		ret = ENOMEM;
 		goto fail;
 	}
@@ -527,7 +526,7 @@ int ctdbd_conn_get_fd(struct ctdbd_connection *conn)
 static int ctdb_handle_message(struct ctdbd_connection *conn,
 			       struct ctdb_req_header *hdr)
 {
-	struct ctdb_req_message *msg;
+	struct ctdb_req_message_old *msg;
 
 	if (hdr->operation != CTDB_REQ_MESSAGE) {
 		DEBUG(0, ("Received async msg of type %u, discarding\n",
@@ -535,7 +534,7 @@ static int ctdb_handle_message(struct ctdbd_connection *conn,
 		return EINVAL;
 	}
 
-	msg = (struct ctdb_req_message *)hdr;
+	msg = (struct ctdb_req_message_old *)hdr;
 
 	ctdbd_msg_call_back(conn, msg);
 
@@ -599,12 +598,12 @@ int ctdbd_messaging_send_iov(struct ctdbd_connection *conn,
 			     uint32_t dst_vnn, uint64_t dst_srvid,
 			     const struct iovec *iov, int iovlen)
 {
-	struct ctdb_req_message r;
+	struct ctdb_req_message_old r;
 	struct iovec iov2[iovlen+1];
 	size_t buflen = iov_buflen(iov, iovlen);
 	ssize_t nwritten;
 
-	r.hdr.length = offsetof(struct ctdb_req_message, data) + buflen;
+	r.hdr.length = offsetof(struct ctdb_req_message_old, data) + buflen;
 	r.hdr.ctdb_magic = CTDB_MAGIC;
 	r.hdr.ctdb_version = CTDB_PROTOCOL;
 	r.hdr.generation = 1;
@@ -619,7 +618,7 @@ int ctdbd_messaging_send_iov(struct ctdbd_connection *conn,
 	ctdb_packet_dump(&r.hdr);
 
 	iov2[0].iov_base = &r;
-	iov2[0].iov_len = offsetof(struct ctdb_req_message, data);
+	iov2[0].iov_len = offsetof(struct ctdb_req_message_old, data);
 	memcpy(&iov2[1], iov, iovlen * sizeof(struct iovec));
 
 	nwritten = write_data_iov(conn->fd, iov2, iovlen+1);
@@ -641,15 +640,15 @@ static int ctdbd_control(struct ctdbd_connection *conn,
 			 TALLOC_CTX *mem_ctx, TDB_DATA *outdata,
 			 int *cstatus)
 {
-	struct ctdb_req_control req;
+	struct ctdb_req_control_old req;
 	struct ctdb_req_header *hdr;
-	struct ctdb_reply_control *reply = NULL;
+	struct ctdb_reply_control_old *reply = NULL;
 	struct iovec iov[2];
 	ssize_t nwritten;
 	int ret;
 
 	ZERO_STRUCT(req);
-	req.hdr.length = offsetof(struct ctdb_req_control, data) + data.dsize;
+	req.hdr.length = offsetof(struct ctdb_req_control_old, data) + data.dsize;
 	req.hdr.ctdb_magic   = CTDB_MAGIC;
 	req.hdr.ctdb_version = CTDB_PROTOCOL;
 	req.hdr.operation    = CTDB_REQ_CONTROL;
@@ -664,7 +663,7 @@ static int ctdbd_control(struct ctdbd_connection *conn,
 	ctdb_packet_dump(&req.hdr);
 
 	iov[0].iov_base = &req;
-	iov[0].iov_len = offsetof(struct ctdb_req_control, data);
+	iov[0].iov_len = offsetof(struct ctdb_req_control_old, data);
 	iov[1].iov_base = data.dptr;
 	iov[1].iov_len = data.dsize;
 
@@ -692,7 +691,7 @@ static int ctdbd_control(struct ctdbd_connection *conn,
 		TALLOC_FREE(hdr);
 		return EIO;
 	}
-	reply = (struct ctdb_reply_control *)hdr;
+	reply = (struct ctdb_reply_control_old *)hdr;
 
 	if (outdata) {
 		if (!(outdata->dptr = (uint8_t *)talloc_memdup(
@@ -743,7 +742,7 @@ bool ctdb_processes_exist(struct ctdbd_connection *conn,
 	}
 
 	for (i=0; i<num_pids; i++) {
-		struct ctdb_req_control req;
+		struct ctdb_req_control_old req;
 		pid_t pid;
 		struct iovec iov[2];
 		ssize_t nwritten;
@@ -763,7 +762,7 @@ bool ctdb_processes_exist(struct ctdbd_connection *conn,
 			   (int)pids[i].vnn, (int)pid,
 			   (int)reqids[i]));
 
-		req.hdr.length = offsetof(struct ctdb_req_control, data);
+		req.hdr.length = offsetof(struct ctdb_req_control_old, data);
 		req.hdr.length += sizeof(pid);
 		req.hdr.ctdb_magic   = CTDB_MAGIC;
 		req.hdr.ctdb_version = CTDB_PROTOCOL;
@@ -779,7 +778,7 @@ bool ctdb_processes_exist(struct ctdbd_connection *conn,
 		ctdb_packet_dump(&req.hdr);
 
 		iov[0].iov_base = &req;
-		iov[0].iov_len = offsetof(struct ctdb_req_control, data);
+		iov[0].iov_len = offsetof(struct ctdb_req_control_old, data);
 		iov[1].iov_base = &pid;
 		iov[1].iov_len = sizeof(pid);
 
@@ -795,7 +794,7 @@ bool ctdb_processes_exist(struct ctdbd_connection *conn,
 
 	while (num_received < num_pids) {
 		struct ctdb_req_header *hdr;
-		struct ctdb_reply_control *reply;
+		struct ctdb_reply_control_old *reply;
 		uint32_t reqid;
 		int ret;
 
@@ -810,7 +809,7 @@ bool ctdb_processes_exist(struct ctdbd_connection *conn,
 			DEBUG(10, ("Received invalid reply\n"));
 			goto fail;
 		}
-		reply = (struct ctdb_reply_control *)hdr;
+		reply = (struct ctdb_reply_control_old *)hdr;
 
 		reqid = reply->hdr.reqid;
 
@@ -919,7 +918,7 @@ int ctdbd_db_attach(struct ctdbd_connection *conn,
  */
 int ctdbd_migrate(struct ctdbd_connection *conn, uint32_t db_id, TDB_DATA key)
 {
-	struct ctdb_req_call req;
+	struct ctdb_req_call_old req;
 	struct ctdb_req_header *hdr;
 	struct iovec iov[2];
 	ssize_t nwritten;
@@ -927,7 +926,7 @@ int ctdbd_migrate(struct ctdbd_connection *conn, uint32_t db_id, TDB_DATA key)
 
 	ZERO_STRUCT(req);
 
-	req.hdr.length = offsetof(struct ctdb_req_call, data) + key.dsize;
+	req.hdr.length = offsetof(struct ctdb_req_call_old, data) + key.dsize;
 	req.hdr.ctdb_magic   = CTDB_MAGIC;
 	req.hdr.ctdb_version = CTDB_PROTOCOL;
 	req.hdr.operation    = CTDB_REQ_CALL;
@@ -941,7 +940,7 @@ int ctdbd_migrate(struct ctdbd_connection *conn, uint32_t db_id, TDB_DATA key)
 	ctdb_packet_dump(&req.hdr);
 
 	iov[0].iov_base = &req;
-	iov[0].iov_len = offsetof(struct ctdb_req_call, data);
+	iov[0].iov_len = offsetof(struct ctdb_req_call_old, data);
 	iov[1].iov_base = key.dptr;
 	iov[1].iov_len = key.dsize;
 
@@ -977,9 +976,9 @@ int ctdbd_parse(struct ctdbd_connection *conn, uint32_t db_id,
 			       void *private_data),
 		void *private_data)
 {
-	struct ctdb_req_call req;
+	struct ctdb_req_call_old req;
 	struct ctdb_req_header *hdr = NULL;
-	struct ctdb_reply_call *reply;
+	struct ctdb_reply_call_old *reply;
 	struct iovec iov[2];
 	ssize_t nwritten;
 	uint32_t flags;
@@ -989,7 +988,7 @@ int ctdbd_parse(struct ctdbd_connection *conn, uint32_t db_id,
 
 	ZERO_STRUCT(req);
 
-	req.hdr.length = offsetof(struct ctdb_req_call, data) + key.dsize;
+	req.hdr.length = offsetof(struct ctdb_req_call_old, data) + key.dsize;
 	req.hdr.ctdb_magic   = CTDB_MAGIC;
 	req.hdr.ctdb_version = CTDB_PROTOCOL;
 	req.hdr.operation    = CTDB_REQ_CALL;
@@ -1000,7 +999,7 @@ int ctdbd_parse(struct ctdbd_connection *conn, uint32_t db_id,
 	req.keylen           = key.dsize;
 
 	iov[0].iov_base = &req;
-	iov[0].iov_len = offsetof(struct ctdb_req_call, data);
+	iov[0].iov_len = offsetof(struct ctdb_req_call_old, data);
 	iov[1].iov_base = key.dptr;
 	iov[1].iov_len = key.dsize;
 
@@ -1021,7 +1020,7 @@ int ctdbd_parse(struct ctdbd_connection *conn, uint32_t db_id,
 		ret = EIO;
 		goto fail;
 	}
-	reply = (struct ctdb_reply_call *)hdr;
+	reply = (struct ctdb_reply_call_old *)hdr;
 
 	if (reply->datalen == 0) {
 		/*
@@ -1094,8 +1093,8 @@ int ctdbd_traverse(struct ctdbd_connection *master, uint32_t db_id,
 
 	while (True) {
 		struct ctdb_req_header *hdr = NULL;
-		struct ctdb_req_message *m;
-		struct ctdb_rec_data *d;
+		struct ctdb_req_message_old *m;
+		struct ctdb_rec_data_old *d;
 
 		ret = ctdb_read_packet(conn->fd, conn->timeout, conn, &hdr);
 		if (ret != 0) {
@@ -1111,8 +1110,8 @@ int ctdbd_traverse(struct ctdbd_connection *master, uint32_t db_id,
 			return EIO;
 		}
 
-		m = (struct ctdb_req_message *)hdr;
-		d = (struct ctdb_rec_data *)&m->data[0];
+		m = (struct ctdb_req_message_old *)hdr;
+		d = (struct ctdb_rec_data_old *)&m->data[0];
 		if (m->datalen < sizeof(uint32_t) || m->datalen != d->length) {
 			DEBUG(0, ("Got invalid traverse data of length %d\n",
 				  (int)m->datalen));
@@ -1187,7 +1186,7 @@ int ctdbd_register_ips(struct ctdbd_connection *conn,
 				 void *private_data),
 		       void *private_data)
 {
-	struct ctdb_control_tcp_addr p;
+	struct ctdb_connection p;
 	TDB_DATA data = { .dptr = (uint8_t *)&p, .dsize = sizeof(p) };
 	int ret;
 	struct sockaddr_storage client;
@@ -1202,11 +1201,11 @@ int ctdbd_register_ips(struct ctdbd_connection *conn,
 
 	switch (client.ss_family) {
 	case AF_INET:
-		memcpy(&p.dest.ip, &server, sizeof(p.dest.ip));
+		memcpy(&p.dst.ip, &server, sizeof(p.dst.ip));
 		memcpy(&p.src.ip, &client, sizeof(p.src.ip));
 		break;
 	case AF_INET6:
-		memcpy(&p.dest.ip6, &server, sizeof(p.dest.ip6));
+		memcpy(&p.dst.ip6, &server, sizeof(p.dst.ip6));
 		memcpy(&p.src.ip6, &client, sizeof(p.src.ip6));
 		break;
 	default:
@@ -1252,7 +1251,7 @@ int ctdbd_control_local(struct ctdbd_connection *conn, uint32_t opcode,
 
 int ctdb_watch_us(struct ctdbd_connection *conn)
 {
-	struct ctdb_client_notify_register reg_data;
+	struct ctdb_notify_data_old reg_data;
 	size_t struct_len;
 	int ret;
 	int cstatus;
@@ -1261,7 +1260,7 @@ int ctdb_watch_us(struct ctdbd_connection *conn)
 	reg_data.len = 1;
 	reg_data.notify_data[0] = 0;
 
-	struct_len = offsetof(struct ctdb_client_notify_register,
+	struct_len = offsetof(struct ctdb_notify_data_old,
 			      notify_data) + reg_data.len;
 
 	ret = ctdbd_control_local(
@@ -1277,15 +1276,13 @@ int ctdb_watch_us(struct ctdbd_connection *conn)
 
 int ctdb_unwatch(struct ctdbd_connection *conn)
 {
-	struct ctdb_client_notify_deregister dereg_data;
+	uint64_t srvid = CTDB_SRVID_SAMBA_NOTIFY;
 	int ret;
 	int cstatus;
 
-	dereg_data.srvid = CTDB_SRVID_SAMBA_NOTIFY;
-
 	ret = ctdbd_control_local(
 		conn, CTDB_CONTROL_DEREGISTER_NOTIFY, conn->rand_srvid, 0,
-		make_tdb_data((uint8_t *)&dereg_data, sizeof(dereg_data)),
+		make_tdb_data((uint8_t *)&srvid, sizeof(srvid)),
 		NULL, NULL, &cstatus);
 	if (ret != 0) {
 		DEBUG(1, ("ctdbd_control_local failed: %s\n",

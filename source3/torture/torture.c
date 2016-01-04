@@ -4409,6 +4409,72 @@ static bool run_deletetest(int dummy)
 	return correct;
 }
 
+
+/*
+  Test wildcard delete.
+ */
+static bool run_wild_deletetest(int dummy)
+{
+	struct cli_state *cli = NULL;
+	const char *dname = "\\WTEST";
+	const char *fname = "\\WTEST\\A";
+	const char *wunlink_name = "\\WTEST\\*";
+	uint16_t fnum1 = (uint16_t)-1;
+	bool correct = false;
+	NTSTATUS status;
+
+	printf("starting wildcard delete test\n");
+
+	if (!torture_open_connection(&cli, 0)) {
+		return false;
+	}
+
+	smbXcli_conn_set_sockopt(cli->conn, sockops);
+
+	cli_unlink(cli, fname, 0);
+	cli_rmdir(cli, dname);
+	status = cli_mkdir(cli, dname);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("mkdir of %s failed %s!\n", dname, nt_errstr(status));
+		goto fail;
+	}
+	status = cli_openx(cli, fname, O_CREAT|O_RDONLY, DENY_NONE, &fnum1);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("open of %s failed %s!\n", fname, nt_errstr(status));
+		goto fail;
+	}
+	status = cli_close(cli, fnum1);
+	fnum1 = -1;
+
+	/*
+	 * Note the unlink attribute-type of zero. This should
+	 * map into FILE_ATTRIBUTE_NORMAL at the server even
+	 * on a wildcard delete.
+	 */
+
+	status = cli_unlink(cli, wunlink_name, 0);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("unlink of %s failed %s!\n",
+			wunlink_name, nt_errstr(status));
+		goto fail;
+	}
+
+	printf("finished wildcard delete test\n");
+
+	correct = true;
+
+  fail:
+
+	if (fnum1 != (uint16_t)-1) cli_close(cli, fnum1);
+	cli_unlink(cli, fname, 0);
+	cli_rmdir(cli, dname);
+
+	if (cli && !torture_close_connection(cli)) {
+		correct = false;
+	}
+	return correct;
+}
+
 static bool run_deletetest_ln(int dummy)
 {
 	struct cli_state *cli;
@@ -8281,11 +8347,29 @@ static bool rbt_testval(struct db_context *db, const char *key,
 	return ret;
 }
 
+static int local_rbtree_traverse_read(struct db_record *rec, void *private_data)
+{
+	int *count2 = (int *)private_data;
+	(*count2)++;
+	return 0;
+}
+
+static int local_rbtree_traverse_delete(struct db_record *rec, void *private_data)
+{
+	int *count2 = (int *)private_data;
+	(*count2)++;
+	dbwrap_record_delete(rec);
+	return 0;
+}
+
 static bool run_local_rbtree(int dummy)
 {
 	struct db_context *db;
 	bool ret = false;
 	int i;
+	NTSTATUS status;
+	int count = 0;
+	int count2 = 0;
 
 	db = db_open_rbt(NULL);
 
@@ -8328,6 +8412,27 @@ static bool run_local_rbtree(int dummy)
 	}
 
 	ret = true;
+	count = 0; count2 = 0;
+	status = dbwrap_traverse_read(db, local_rbtree_traverse_read,
+				      &count2, &count);
+	printf("%s: read1: %d %d, %s\n", __func__, count, count2, nt_errstr(status));
+	if ((count != count2) || (count != 1000)) {
+		ret = false;
+	}
+	count = 0; count2 = 0;
+	status = dbwrap_traverse(db, local_rbtree_traverse_delete,
+				 &count2, &count);
+	printf("%s: delete: %d %d, %s\n", __func__, count, count2, nt_errstr(status));
+	if ((count != count2) || (count != 1000)) {
+		ret = false;
+	}
+	count = 0; count2 = 0;
+	status = dbwrap_traverse_read(db, local_rbtree_traverse_read,
+				      &count2, &count);
+	printf("%s: read2: %d %d, %s\n", __func__, count, count2, nt_errstr(status));
+	if ((count != count2) || (count != 0)) {
+		ret = false;
+	}
 
  done:
 	TALLOC_FREE(db);
@@ -9548,6 +9653,7 @@ static struct {
 	{"XCOPY", run_xcopy, 0},
 	{"RENAME", run_rename, 0},
 	{"DELETE", run_deletetest, 0},
+	{"WILDDELETE", run_wild_deletetest, 0},
 	{"DELETE-LN", run_deletetest_ln, 0},
 	{"PROPERTIES", run_properties, 0},
 	{"MANGLE", torture_mangle, 0},

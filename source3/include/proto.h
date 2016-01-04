@@ -88,26 +88,7 @@ int map_errno_from_nt_status(NTSTATUS status);
 
 struct file_id vfs_file_id_from_sbuf(connection_struct *conn, const SMB_STRUCT_STAT *sbuf);
 
-/* The following definitions come from lib/gencache.c  */
-
-bool gencache_set(const char *keystr, const char *value, time_t timeout);
-bool gencache_del(const char *keystr);
-bool gencache_get(const char *keystr, TALLOC_CTX *mem_ctx, char **value,
-		  time_t *ptimeout);
-bool gencache_parse(const char *keystr,
-		    void (*parser)(time_t timeout, DATA_BLOB blob,
-				   void *private_data),
-		    void *private_data);
-bool gencache_get_data_blob(const char *keystr, TALLOC_CTX *mem_ctx,
-			    DATA_BLOB *blob,
-			    time_t *timeout, bool *was_expired);
-bool gencache_stabilize(void);
-bool gencache_set_data_blob(const char *keystr, const DATA_BLOB *blob, time_t timeout);
-void gencache_iterate_blobs(void (*fn)(const char *key, DATA_BLOB value,
-				       time_t timeout, void *private_data),
-			    void *private_data, const char *pattern);
-void gencache_iterate(void (*fn)(const char* key, const char *value, time_t timeout, void* dptr),
-                      void* data, const char* keystr_pattern);
+#include "lib/gencache.h"
 
 /* The following definitions come from lib/interface.c  */
 
@@ -419,9 +400,7 @@ int smb_mkstemp(char *name_template);
 void *smb_xmalloc_array(size_t size, unsigned int count);
 char *myhostname(void);
 char *myhostname_upper(void);
-char *lock_path(const char *name);
-char *state_path(const char *name);
-char *cache_path(const char *name);
+#include "lib/util_path.h"
 bool parent_dirname(TALLOC_CTX *mem_ctx, const char *dir, char **parent,
 		    const char **name);
 bool ms_has_wild(const char *s);
@@ -431,19 +410,12 @@ bool mask_match_search(const char *string, const char *pattern, bool is_case_sen
 bool mask_match_list(const char *string, char **list, int listLen, bool is_case_sensitive);
 bool unix_wild_match(const char *pattern, const char *string);
 bool name_to_fqdn(fstring fqdn, const char *name);
-void *talloc_append_blob(TALLOC_CTX *mem_ctx, void *buf, DATA_BLOB blob);
 uint32_t map_share_mode_to_deny_mode(uint32_t share_access, uint32_t private_options);
-pid_t procid_to_pid(const struct server_id *proc);
-void set_my_vnn(uint32_t vnn);
-uint32_t get_my_vnn(void);
-void set_my_unique_id(uint64_t unique_id);
-struct server_id pid_to_procid(pid_t pid);
-struct server_id procid_self(void);
+
+#include "lib/util_procid.h"
+
 #define serverid_equal(p1, p2) server_id_equal(p1,p2)
-bool procid_is_me(const struct server_id *pid);
 struct server_id interpret_pid(const char *pid_string);
-bool procid_valid(const struct server_id *pid);
-bool procid_is_local(const struct server_id *pid);
 bool is_offset_safe(const char *buf_base, size_t buf_len, char *ptr, size_t off);
 char *get_safe_ptr(const char *buf_base, size_t buf_len, char *ptr, size_t off);
 char *get_safe_str_ptr(const char *buf_base, size_t buf_len, char *ptr, size_t off);
@@ -770,7 +742,6 @@ void flush_negative_conn_cache_for_domain(const char *domain);
 
 struct netr_DsRGetDCNameInfo;
 
-void debug_dsdcinfo_flags(int lvl, uint32_t flags);
 NTSTATUS dsgetdcname(TALLOC_CTX *mem_ctx,
 		     struct messaging_context *msg_ctx,
 		     const char *domain_name,
@@ -1096,7 +1067,6 @@ uint32_t lp_get_spoolss_state( void );
 struct smb_signing_state;
 bool lp_use_sendfile(int snum, struct smb_signing_state *signing_state);
 void set_use_sendfile(int snum, bool val);
-void set_store_dos_attributes(int snum, bool val);
 void lp_set_mangling_method(const char *new_method);
 bool lp_posix_pathnames(void);
 void lp_set_posix_pathnames(void);

@@ -300,7 +300,10 @@ struct messaging_context *messaging_init(TALLOC_CTX *mem_ctx,
 		return NULL;
 	}
 
-	ctx->id = procid_self();
+	ctx->id = (struct server_id) {
+		.pid = getpid(), .vnn = NONCLUSTER_VNN
+	};
+
 	ctx->event_ctx = ev;
 
 	sec_init();
@@ -336,7 +339,7 @@ struct messaging_context *messaging_init(TALLOC_CTX *mem_ctx,
 	}
 
 	ctx->msg_dgm_ref = messaging_dgm_ref(
-		ctx, ctx->event_ctx, ctx->id.unique_id,
+		ctx, ctx->event_ctx, &ctx->id.unique_id,
 		priv_path, lck_path, messaging_recv_cb, ctx, &ret);
 
 	if (ctx->msg_dgm_ref == NULL) {
@@ -393,10 +396,12 @@ NTSTATUS messaging_reinit(struct messaging_context *msg_ctx)
 
 	TALLOC_FREE(msg_ctx->msg_dgm_ref);
 
-	msg_ctx->id = procid_self();
+	msg_ctx->id = (struct server_id) {
+		.pid = getpid(), .vnn = msg_ctx->id.vnn
+	};
 
 	msg_ctx->msg_dgm_ref = messaging_dgm_ref(
-		msg_ctx, msg_ctx->event_ctx, msg_ctx->id.unique_id,
+		msg_ctx, msg_ctx->event_ctx, &msg_ctx->id.unique_id,
 		private_path("msg.sock"), lock_path("msg.lock"),
 		messaging_recv_cb, msg_ctx, &ret);
 

@@ -66,6 +66,9 @@ void srv_set_signing(struct smbXsrv_connection *conn,
 
 /* The following definitions come from smbd/aio.c  */
 
+int get_outstanding_aio_calls(void);
+void increment_outstanding_aio_calls(void);
+void decrement_outstanding_aio_calls(void);
 struct aio_extra;
 bool aio_write_through_requested(struct aio_extra *aio_ex);
 NTSTATUS schedule_aio_read_and_X(connection_struct *conn,
@@ -229,6 +232,8 @@ long TellDir(struct smb_Dir *dirp);
 bool SearchDir(struct smb_Dir *dirp, const char *name, long *poffset);
 NTSTATUS can_delete_directory(struct connection_struct *conn,
 				const char *dirname);
+bool have_file_open_below(connection_struct *conn,
+			const struct smb_filename *name);
 
 /* The following definitions come from smbd/dmapi.c  */
 
@@ -842,7 +847,24 @@ size_t srvstr_get_path_wcard(TALLOC_CTX *ctx,
 			int flags,
 			NTSTATUS *err,
 			bool *contains_wcard);
+size_t srvstr_get_path_wcard_posix(TALLOC_CTX *ctx,
+			const char *inbuf,
+			uint16_t smb_flags2,
+			char **pp_dest,
+			const char *src,
+			size_t src_len,
+			int flags,
+			NTSTATUS *err,
+			bool *contains_wcard);
 size_t srvstr_get_path(TALLOC_CTX *ctx,
+			const char *inbuf,
+			uint16_t smb_flags2,
+			char **pp_dest,
+			const char *src,
+			size_t src_len,
+			int flags,
+			NTSTATUS *err);
+size_t srvstr_get_path_posix(TALLOC_CTX *ctx,
 			const char *inbuf,
 			uint16_t smb_flags2,
 			char **pp_dest,
@@ -1076,6 +1098,8 @@ int sys_statvfs(const char *path, vfs_statvfs_struct *statbuf);
 
 /* The following definitions come from smbd/trans2.c  */
 
+NTSTATUS check_access_fsp(const struct files_struct *fsp,
+			  uint32_t access_mask);
 NTSTATUS check_access(connection_struct *conn,
 				files_struct *fsp,
 				const struct smb_filename *smb_fname,

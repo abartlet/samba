@@ -494,6 +494,21 @@ int ctdb_ltdb_header_pull(uint8_t *buf, size_t buflen,
 	return 0;
 }
 
+int ctdb_ltdb_header_extract(TDB_DATA *data, struct ctdb_ltdb_header *header)
+{
+	int ret;
+
+	ret = ctdb_ltdb_header_pull(data->dptr, data->dsize, header);
+	if (ret != 0) {
+		return ret;
+	}
+
+	data->dptr += sizeof(struct ctdb_ltdb_header);
+	data->dsize -= sizeof(struct ctdb_ltdb_header);
+
+	return 0;
+}
+
 struct ctdb_rec_data_wire {
 	uint32_t length;
 	uint32_t reqid;
@@ -518,6 +533,9 @@ void ctdb_rec_data_push(struct ctdb_rec_data *rec, uint8_t *buf)
 	wire->reqid = rec->reqid;
 	wire->keylen = rec->key.dsize;
 	wire->datalen = rec->data.dsize;
+	if (rec->header != NULL) {
+		wire->datalen += sizeof(struct ctdb_ltdb_header);
+	}
 
 	memcpy(wire->data, rec->key.dptr, rec->key.dsize);
 	offset = rec->key.dsize;
@@ -555,12 +573,10 @@ static int ctdb_rec_data_pull_data(uint8_t *buf, size_t buflen,
 	key->dptr = wire->data;
 	offset = wire->keylen;
 
-	if (wire->length - n == sizeof(struct ctdb_ltdb_header)) {
-		*header = (struct ctdb_ltdb_header *)&wire->data[offset];
-		offset += sizeof(struct ctdb_ltdb_header);
-	} else {
-		*header = NULL;
-	}
+	/* Always set header to NULL.  If it is required, exact it using
+	 * ctdb_rec_data_extract_header()
+	 */
+	*header = NULL;
 
 	data->dsize = wire->datalen;
 	data->dptr = &wire->data[offset];
@@ -587,16 +603,7 @@ static int ctdb_rec_data_pull_elems(uint8_t *buf, size_t buflen,
 	}
 
 	out->reqid = reqid;
-
-	if (header != NULL) {
-		out->header = talloc_memdup(mem_ctx, header,
-					    sizeof(struct ctdb_ltdb_header));
-		if (out->header == NULL) {
-			return ENOMEM;
-		}
-	} else {
-		out->header = NULL;
-	}
+	out->header = NULL;
 
 	out->key.dsize = key.dsize;
 	if (key.dsize > 0) {
@@ -1458,8 +1465,14 @@ struct ctdb_addr_info_wire {
 
 size_t ctdb_addr_info_len(struct ctdb_addr_info *arp)
 {
-	return offsetof(struct ctdb_addr_info_wire, iface) +
-	       strlen(arp->iface)+1;
+	uint32_t len;
+
+	len = offsetof(struct ctdb_addr_info_wire, iface);
+	if (arp->iface != NULL) {
+	       len += strlen(arp->iface)+1;
+	}
+
+	return len;
 }
 
 void ctdb_addr_info_push(struct ctdb_addr_info *addr_info, uint8_t *buf)
@@ -1468,8 +1481,12 @@ void ctdb_addr_info_push(struct ctdb_addr_info *addr_info, uint8_t *buf)
 
 	wire->addr = addr_info->addr;
 	wire->mask = addr_info->mask;
-	wire->len = strlen(addr_info->iface)+1;
-	memcpy(wire->iface, addr_info->iface, wire->len);
+	if (addr_info->iface == NULL) {
+		wire->len = 0;
+	} else {
+		wire->len = strlen(addr_info->iface)+1;
+		memcpy(wire->iface, addr_info->iface, wire->len);
+	}
 }
 
 int ctdb_addr_info_pull(uint8_t *buf, size_t buflen, TALLOC_CTX *mem_ctx,
@@ -1493,10 +1510,15 @@ int ctdb_addr_info_pull(uint8_t *buf, size_t buflen, TALLOC_CTX *mem_ctx,
 	addr_info->addr = wire->addr;
 	addr_info->mask = wire->mask;
 
-	addr_info->iface = talloc_strndup(addr_info, wire->iface, wire->len);
-	if (addr_info->iface == NULL) {
-		talloc_free(addr_info);
-		return ENOMEM;
+	if (wire->len == 0) {
+		addr_info->iface = NULL;
+	} else {
+		addr_info->iface = talloc_strndup(addr_info, wire->iface,
+						  wire->len);
+		if (addr_info->iface == NULL) {
+			talloc_free(addr_info);
+			return ENOMEM;
+		}
 	}
 
 	*out = addr_info;
@@ -1660,6 +1682,11 @@ int ctdb_public_ip_list_pull(uint8_t *buf, size_t buflen, TALLOC_CTX *mem_ctx,
 	}
 
 	pubip_list->num = wire->num;
+	if (wire->num == 0) {
+		pubip_list->ip = NULL;
+		*out = pubip_list;
+		return 0;
+	}
 	pubip_list->ip = talloc_array(pubip_list, struct ctdb_public_ip,
 				      wire->num);
 	if (pubip_list->ip == NULL) {
@@ -2421,6 +2448,35 @@ int ctdb_disable_message_pull(uint8_t *buf, size_t buflen, TALLOC_CTX *mem_ctx,
 	}
 
 	*out = disable;
+	return 0;
+}
+
+size_t ctdb_tdb_data_len(TDB_DATA data)
+{
+	return data.dsize;
+}
+
+void ctdb_tdb_data_push(TDB_DATA data, uint8_t *buf)
+{
+	memcpy(buf, data.dptr, data.dsize);
+}
+
+int ctdb_tdb_data_pull(uint8_t *buf, size_t buflen, TALLOC_CTX *mem_ctx,
+		       TDB_DATA *out)
+{
+	TDB_DATA data;
+
+	data.dsize = buflen;
+	if (data.dsize > 0) {
+		data.dptr = talloc_memdup(mem_ctx, buf, buflen);
+		if (data.dptr == NULL) {
+			return ENOMEM;
+		}
+	} else {
+		data.dptr = NULL;
+	}
+
+	*out = data;
 	return 0;
 }
 

@@ -215,11 +215,12 @@ static void fill_ctdb_rec_data(TALLOC_CTX *mem_ctx, struct ctdb_rec_data *p)
 static void verify_ctdb_rec_data(struct ctdb_rec_data *p1,
 				 struct ctdb_rec_data *p2)
 {
+	struct ctdb_ltdb_header header;
+
 	assert(p1->reqid == p2->reqid);
-	if (p1->header == NULL || p2->header == NULL) {
-		assert(p1->header == p2->header);
-	} else {
-		verify_ctdb_ltdb_header(p1->header, p2->header);
+	if (p1->header != NULL) {
+		assert(ctdb_ltdb_header_extract(&p2->data, &header) == 0);
+		verify_ctdb_ltdb_header(p1->header, &header);
 	}
 	verify_tdb_data(&p1->key, &p2->key);
 	verify_tdb_data(&p1->data, &p2->data);
@@ -556,7 +557,11 @@ static void fill_ctdb_addr_info(TALLOC_CTX *mem_ctx, struct ctdb_addr_info *p)
 {
 	fill_ctdb_sock_addr(mem_ctx, &p->addr);
 	p->mask = rand_int(33);
-	fill_ctdb_string(mem_ctx, &p->iface);
+	if (rand_int(2) == 0) {
+		p->iface = NULL;
+	} else {
+		fill_ctdb_string(mem_ctx, &p->iface);
+	}
 }
 
 static void verify_ctdb_addr_info(struct ctdb_addr_info *p1,
@@ -607,7 +612,11 @@ static void fill_ctdb_public_ip_list(TALLOC_CTX *mem_ctx,
 {
 	int i;
 
-	p->num = rand_int(32) + 1;
+	p->num = rand_int(32);
+	if (p->num == 0) {
+		p->ip = NULL;
+		return;
+	}
 	p->ip = talloc_array(mem_ctx, struct ctdb_public_ip, p->num);
 	assert(p->ip != NULL);
 	for (i=0; i<p->num; i++) {

@@ -1379,8 +1379,11 @@ static NTSTATUS winbind_samlogon_retry_loop(struct winbindd_domain *domain,
 			return result;
 		}
 		netr_attempts = 0;
-
-		if (interactive && username != NULL && password != NULL) {
+		if (domain->conn.netlogon_creds == NULL) {
+			DBG_NOTICE("No security credentials available for "
+				  "domain [%s]\n", domainname);
+			result = NT_STATUS_CANT_ACCESS_DOMAIN_INFO;
+		} else if (interactive && username != NULL && password != NULL) {
 			result = rpccli_netlogon_password_logon(domain->conn.netlogon_creds,
 								netlogon_pipe->binding_handle,
 								mem_ctx,
@@ -1838,7 +1841,7 @@ process_result:
 						      cached_info3->base.full_name.string);
 			} else {
 
-				/* this might fail so we dont check the return code */
+				/* this might fail so we don't check the return code */
 				wcache_query_user_fullname(domain,
 						info3,
 						&user_sid,
@@ -1999,7 +2002,7 @@ process_result:
 						      cached_info3->base.full_name.string);
 			} else {
 
-				/* this might fail so we dont check the return code */
+				/* this might fail so we don't check the return code */
 				wcache_query_user_fullname(domain,
 						*info3,
 						&user_sid,

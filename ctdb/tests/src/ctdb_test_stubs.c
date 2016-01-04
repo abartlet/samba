@@ -175,8 +175,8 @@ static void ctdb_test_stubs_print_nodemap(struct ctdb_context *ctdb)
  *   :eth1:1:4294967292
  */
 
-struct ctdb_iface {
-	struct ctdb_iface *prev, *next;
+struct ctdb_interface {
+	struct ctdb_interface *prev, *next;
 	const char *name;
 	bool link_up;
 	uint32_t references;
@@ -185,7 +185,7 @@ struct ctdb_iface {
 static void ctdb_test_stubs_read_ifaces(struct ctdb_context *ctdb)
 {
 	char line[1024];
-	struct ctdb_iface *iface;
+	struct ctdb_interface *iface;
 
 	while ((fgets(line, sizeof(line), stdin) != NULL) &&
 	       (line[0] != '\n')) {
@@ -227,7 +227,7 @@ static void ctdb_test_stubs_read_ifaces(struct ctdb_context *ctdb)
 		}
 		references = (uint32_t)strtoul(tok, NULL, 0);
 
-		iface = talloc_zero(ctdb, struct ctdb_iface);
+		iface = talloc_zero(ctdb, struct ctdb_interface);
 
 		if (iface == NULL) {
 			DEBUG(DEBUG_ERR, ("OOM allocating iface\n"));
@@ -253,7 +253,7 @@ static void assert_ifaces_set(struct ctdb_context *ctdb)
 #ifdef CTDB_TEST_OVERRIDE_MAIN
 static void ctdb_test_stubs_print_ifaces(struct ctdb_context *ctdb)
 {
-	struct ctdb_iface *iface;
+	struct ctdb_interface *iface;
 
 	assert_ifaces_set(ctdb);
 
@@ -433,7 +433,7 @@ int
 ctdb_ctrl_getnodemap_stub(struct ctdb_context *ctdb,
 			  struct timeval timeout, uint32_t destnode,
 			  TALLOC_CTX *mem_ctx,
-			  struct ctdb_node_map **nodemap)
+			  struct ctdb_node_map_old **nodemap)
 {
 	assert_nodes_set(ctdb);
 
@@ -450,7 +450,7 @@ ctdb_ctrl_getnodemap_stub(struct ctdb_context *ctdb,
 int
 ctdb_ctrl_getnodesfile_stub(struct ctdb_context *ctdb,
 			    struct timeval timeout, uint32_t destnode,
-			    TALLOC_CTX *mem_ctx, struct ctdb_node_map **nodemap)
+			    TALLOC_CTX *mem_ctx, struct ctdb_node_map_old **nodemap)
 {
 	char *v, *f;
 
@@ -540,12 +540,12 @@ ctdb_ctrl_getpnn_stub(struct ctdb_context *ctdb, struct timeval timeout,
 
 /* From ctdb_takeover.c */
 int32_t ctdb_control_get_ifaces(struct ctdb_context *ctdb,
-				struct ctdb_req_control *c,
+				struct ctdb_req_control_old *c,
 				TDB_DATA *outdata)
 {
 	int i, num, len;
-	struct ctdb_control_get_ifaces *ifaces;
-	struct ctdb_iface *cur;
+	struct ctdb_iface_list_old *ifaces;
+	struct ctdb_interface *cur;
 
 	assert_ifaces_set(ctdb);
 
@@ -555,8 +555,8 @@ int32_t ctdb_control_get_ifaces(struct ctdb_context *ctdb,
 		num++;
 	}
 
-	len = offsetof(struct ctdb_control_get_ifaces, ifaces) +
-		num*sizeof(struct ctdb_control_iface_info);
+	len = offsetof(struct ctdb_iface_list_old, ifaces) +
+		num*sizeof(struct ctdb_iface);
 	ifaces = talloc_zero_size(outdata, len);
 	CTDB_NO_MEMORY(ctdb, ifaces);
 
@@ -573,8 +573,8 @@ int32_t ctdb_control_get_ifaces(struct ctdb_context *ctdb,
 		i++;
 	}
 	ifaces->num = i;
-	len = offsetof(struct ctdb_control_get_ifaces, ifaces) +
-		i*sizeof(struct ctdb_control_iface_info);
+	len = offsetof(struct ctdb_iface_list_old, ifaces) +
+		i*sizeof(struct ctdb_iface);
 
 	outdata->dsize = len;
 	outdata->dptr  = (uint8_t *)ifaces;
@@ -586,7 +586,7 @@ int
 ctdb_ctrl_get_ifaces_stub(struct ctdb_context *ctdb,
 			  struct timeval timeout, uint32_t destnode,
 			  TALLOC_CTX *mem_ctx,
-			  struct ctdb_control_get_ifaces **ifaces)
+			  struct ctdb_iface_list_old **ifaces)
 {
 	TDB_DATA *outdata;
 	int ret;
@@ -600,7 +600,7 @@ ctdb_ctrl_get_ifaces_stub(struct ctdb_context *ctdb,
 	ret = ctdb_control_get_ifaces(ctdb, NULL, outdata);
 
 	if (ret == 0) {
-		*ifaces = (struct ctdb_control_get_ifaces *)outdata->dptr;
+		*ifaces = (struct ctdb_iface_list_old *)outdata->dptr;
 	}
 
 	return ret;
@@ -824,7 +824,7 @@ ctdb_client_async_control_stub(struct ctdb_context *ctdb,
 			res = 0;
 			break;
 		case CTDB_CONTROL_GET_NODES_FILE: {
-			struct ctdb_node_map *nodemap;
+			struct ctdb_node_map_old *nodemap;
 			res = ctdb_ctrl_getnodesfile_stub(ctdb, timeout, pnn,
 							  tmp_ctx, &nodemap);
 			if (res == 0) {
@@ -860,7 +860,7 @@ struct ctdb_node_capabilities *
 ctdb_get_capabilities_stub(struct ctdb_context *ctdb,
 			   TALLOC_CTX *mem_ctx,
 			   struct timeval timeout,
-			   struct ctdb_node_map *nodemap)
+			   struct ctdb_node_map_old *nodemap)
 {
 	return global_caps;
 }

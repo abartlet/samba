@@ -159,6 +159,17 @@
 	    Defaults to <filename>/usr/local/var/lib/ctdb</filename>.
 	  </para>
 	  <para>
+	    Apart from a DIRECTORY, this can take a special value of
+	    the form
+	    <option>tmpfs</option><optional>:<parameter>OPTIONS</parameter></optional>.
+	    OPTIONS is a comma-separated list of any permissible
+	    options to the tmpfs filesystem.  The only pre-specified
+	    default is <option>mode=700</option>, which can
+	    overriden by specifying <option>mode</option> in
+	    OPTIONS.  It probably makes sense to specify a maximum
+	    <option>size</option>.
+	  </para>
+	  <para>
 	    Corresponds to <option>--dbdir</option>.
 	  </para>
 	</listitem>
@@ -414,7 +425,7 @@
 	  </para>
 	  <para>
 	    If you change this then you probably want to set this in
-	    root's enviroment (perhaps in a file in
+	    root's environment (perhaps in a file in
 	    <filename>/etc/profile.d</filename>) so that you can use
 	    the <citerefentry><refentrytitle>ctdb</refentrytitle>
 	    <manvolnum>1</manvolnum></citerefentry> command in a

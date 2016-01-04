@@ -17,7 +17,18 @@ Nothing special.
 NEW FEATURES
 ============
 
-TODO...
+Flush requests from SMB2/3 clients are handled asynchronously and do
+not block the processing of other requests. Note that 'strict sync'
+has to be set to 'yes' for Samba to honor flush requests from SMB
+clients.
+
+WINS nsswitch module
+====================
+
+The WINS nsswitch module has been rewritten to address memory issues and to
+simplify the code. The module now uses libwbclient to do WINS queries. This
+means that winbind needs to be running in order to resolve WINS names using
+the nss_wins module. This does not affect smbd.
 
 ######################################################################
 Changes
@@ -28,6 +39,18 @@ smb.conf changes
 
   Parameter Name		Description		Default
   --------------		-----------		-------
+  aio max threads               New                     100
+
+CTDB changes
+------------
+
+* The CTDB tunable parameter EventScriptTimeoutCount has been renamed
+  to MonitorTimeoutCount
+
+  It has only ever been used to limit timed-out monitor events.
+
+  Configurations containing CTDB_SET_EventScriptTimeoutCount=<n> will
+  cause CTDB to fail at startup.  Useful messages will be logged.
 
 KNOWN ISSUES
 ============

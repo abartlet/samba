@@ -311,6 +311,8 @@ struct imessaging_context *imessaging_init(TALLOC_CTX *mem_ctx,
 	struct imessaging_context *msg;
 	bool ok;
 	int ret;
+	const char *lock_dir = NULL;
+	int tdb_flags = TDB_INCOMPATIBLE_HASH | TDB_CLEAR_IF_FIRST;
 
 	if (ev == NULL) {
 		return NULL;
@@ -322,6 +324,11 @@ struct imessaging_context *imessaging_init(TALLOC_CTX *mem_ctx,
 	}
 
 	/* create the messaging directory if needed */
+
+	lock_dir = lpcfg_lock_directory(lp_ctx);
+	if (lock_dir == NULL) {
+		goto fail;
+	}
 
 	msg->sock_dir = lpcfg_private_path(msg, lp_ctx, "msg.sock");
 	if (msg->sock_dir == NULL) {
@@ -342,7 +349,7 @@ struct imessaging_context *imessaging_init(TALLOC_CTX *mem_ctx,
 	}
 
 	msg->msg_dgm_ref = messaging_dgm_ref(
-		msg, ev, server_id.unique_id, msg->sock_dir, msg->lock_dir,
+		msg, ev, &server_id.unique_id, msg->sock_dir, msg->lock_dir,
 		imessaging_dgm_recv, msg, &ret);
 
 	if (msg->msg_dgm_ref == NULL) {
@@ -362,10 +369,9 @@ struct imessaging_context *imessaging_init(TALLOC_CTX *mem_ctx,
 
 	msg->start_time    = timeval_current();
 
-	msg->names = server_id_db_init(
-		msg, server_id, msg->lock_dir, 0,
-		TDB_INCOMPATIBLE_HASH|TDB_CLEAR_IF_FIRST|
-		lpcfg_tdb_flags(lp_ctx, 0));
+	tdb_flags |= lpcfg_tdb_flags(lp_ctx, 0);
+
+	msg->names = server_id_db_init(msg, server_id, lock_dir, 0, tdb_flags);
 	if (msg->names == NULL) {
 		goto fail;
 	}

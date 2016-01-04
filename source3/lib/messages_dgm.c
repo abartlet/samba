@@ -29,6 +29,7 @@
 #include "lib/param/param.h"
 #include "poll_funcs/poll_funcs_tevent.h"
 #include "unix_msg/unix_msg.h"
+#include "lib/util/genrand.h"
 
 struct sun_path_buf {
 	/*
@@ -67,12 +68,13 @@ static int messaging_dgm_context_destructor(struct messaging_dgm_context *c);
 
 static int messaging_dgm_lockfile_create(struct messaging_dgm_context *ctx,
 					 pid_t pid, int *plockfile_fd,
-					 uint64_t unique)
+					 uint64_t *punique)
 {
 	char buf[64];
 	int lockfile_fd;
 	struct sun_path_buf lockfile_name;
 	struct flock lck;
+	uint64_t unique;
 	int unique_len, ret;
 	ssize_t written;
 
@@ -86,6 +88,26 @@ static int messaging_dgm_lockfile_create(struct messaging_dgm_context *ctx,
 
 	lockfile_fd = open(lockfile_name.buf, O_NONBLOCK|O_CREAT|O_RDWR,
 			   0644);
+
+        if ((lockfile_fd == -1) &&
+	    ((errno == ENXIO) /* Linux */ ||
+	     (errno == ENODEV) /* Linux kernel bug */ ||
+	     (errno == EOPNOTSUPP) /* FreeBSD */)) {
+		/*
+                 * Huh -- a socket? This might be a stale socket from
+                 * an upgrade of Samba. Just unlink and retry, nobody
+                 * else is supposed to be here at this time.
+                 *
+                 * Yes, this is racy, but I don't see a way to deal
+                 * with this properly.
+                 */
+		unlink(lockfile_name.buf);
+
+		lockfile_fd = open(lockfile_name.buf,
+				   O_NONBLOCK|O_CREAT|O_WRONLY,
+				   0644);
+	}
+
 	if (lockfile_fd == -1) {
 		ret = errno;
 		DEBUG(1, ("%s: open failed: %s\n", __func__, strerror(errno)));
@@ -103,6 +125,19 @@ static int messaging_dgm_lockfile_create(struct messaging_dgm_context *ctx,
 		DEBUG(1, ("%s: fcntl failed: %s\n", __func__, strerror(ret)));
 		goto fail_close;
 	}
+
+	/*
+	 * Directly using the binary value for
+	 * SERVERID_UNIQUE_ID_NOT_TO_VERIFY is a layering
+	 * violation. But including all of ndr here just for this
+	 * seems to be a bit overkill to me. Also, messages_dgm might
+	 * be replaced sooner or later by something streams-based,
+	 * where unique_id generation will be handled differently.
+	 */
+
+	do {
+		generate_random_buffer((uint8_t *)&unique, sizeof(unique));
+	} while (unique == UINT64_C(0xFFFFFFFFFFFFFFFF));
 
 	unique_len = snprintf(buf, sizeof(buf), "%ju\n", (uintmax_t)unique);
 
@@ -124,6 +159,7 @@ static int messaging_dgm_lockfile_create(struct messaging_dgm_context *ctx,
 	}
 
 	*plockfile_fd = lockfile_fd;
+	*punique = unique;
 	return 0;
 
 fail_unlink:
@@ -134,7 +170,7 @@ fail_close:
 }
 
 int messaging_dgm_init(struct tevent_context *ev,
-		       uint64_t unique,
+		       uint64_t *punique,
 		       const char *socket_dir,
 		       const char *lockfile_dir,
 		       void (*recv_cb)(const uint8_t *msg,
@@ -186,7 +222,7 @@ int messaging_dgm_init(struct tevent_context *ev,
 	}
 
 	ret = messaging_dgm_lockfile_create(ctx, ctx->pid, &ctx->lockfile_fd,
-					    unique);
+					    punique);
 	if (ret != 0) {
 		DEBUG(1, ("%s: messaging_dgm_create_lockfile failed: %s\n",
 			  __func__, strerror(ret)));

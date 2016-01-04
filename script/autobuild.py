@@ -26,6 +26,7 @@ builddirs = {
     "samba-xc" : ".",
     "samba-ctdb" : ".",
     "samba-libs"  : ".",
+    "samba-static"  : ".",
     "ldb"     : "lib/ldb",
     "tdb"     : "lib/tdb",
     "talloc"  : "lib/talloc",
@@ -37,7 +38,7 @@ builddirs = {
     "retry"   : "."
     }
 
-defaulttasks = [ "ctdb", "samba", "samba-xc", "samba-ctdb", "samba-libs", "ldb", "tdb", "talloc", "replace", "tevent", "pidl" ]
+defaulttasks = [ "ctdb", "samba", "samba-xc", "samba-ctdb", "samba-libs", "samba-static", "ldb", "tdb", "talloc", "replace", "tevent", "pidl" ]
 
 samba_configure_params = " --picky-developer ${PREFIX} --with-profiling-data"
 
@@ -46,7 +47,7 @@ samba_libs_envvars += " PKG_CONFIG_PATH=$PKG_CONFIG_PATH:${PREFIX_DIR}/lib/pkgco
 samba_libs_envvars += " ADDITIONAL_CFLAGS='-Wmissing-prototypes'"
 samba_libs_configure_base = samba_libs_envvars + " ./configure --abi-check --enable-debug --picky-developer -C ${PREFIX}"
 samba_libs_configure_libs = samba_libs_configure_base + " --bundled-libraries=NONE"
-samba_libs_configure_samba = samba_libs_configure_base + " --bundled-libraries=!talloc,!tdb,!pytdb,!ldb,!pyldb,!tevent,!pytevent"
+samba_libs_configure_samba = samba_libs_configure_base + " --bundled-libraries=!talloc,!pytalloc-util,!tdb,!pytdb,!ldb,!pyldb,!pyldb-util,!tevent,!pytevent"
 
 tasks = {
     "ctdb" : [ ("random-sleep", "../script/random-sleep.sh 60 600", "text/plain"),
@@ -112,30 +113,32 @@ tasks = {
                       ("ldb-make", "cd lib/ldb && make", "text/plain"),
                       ("ldb-install", "cd lib/ldb && make install", "text/plain"),
 
-                      ("configure", samba_libs_configure_samba, "text/plain"),
-                      ("make", "make", "text/plain"),
-                      ("install", "make install", "text/plain"),
-                      ("dist", "make dist", "text/plain"),
+                      ("nondevel-configure", "./configure ${PREFIX}", "text/plain"),
+                      ("nondevel-make", "make -j", "text/plain"),
+                      ("nondevel-check", "./bin/smbd -b | grep WITH_NTVFS_FILESERVER && exit 1; exit 0", "text/plain"),
+                      ("nondevel-install", "make install", "text/plain"),
+                      ("nondevel-dist", "make dist", "text/plain"),
 
                       # retry with all modules shared
                       ("allshared-distclean", "make distclean", "text/plain"),
                       ("allshared-configure", samba_libs_configure_samba + " --with-shared-modules=ALL", "text/plain"),
-                      ("allshared-make", "make", "text/plain"),
+                      ("allshared-make", "make -j", "text/plain")],
 
-                      # retry with all modules static
-                      ("allstatic-distclean", "make distclean", "text/plain"),
-                      ("allstatic-configure", samba_libs_configure_samba + " --with-static-modules=ALL", "text/plain"),
-                      ("allstatic-make", "make", "text/plain"),
+    "samba-static" : [
+                      ("random-sleep", "script/random-sleep.sh 60 600", "text/plain"),
+                      # build with all modules static
+                      ("allstatic-configure", "./configure.developer " + samba_configure_params + " --with-static-modules=ALL", "text/plain"),
+                      ("allstatic-make", "make -j", "text/plain"),
 
                       # retry without any required modules
                       ("none-distclean", "make distclean", "text/plain"),
-                      ("none-configure", samba_libs_configure_samba + " --with-static-modules=!FORCED,!DEFAULT --with-shared-modules=!FORCED,!DEFAULT", "text/plain"),
-                      ("none-make", "make", "text/plain"),
+                      ("none-configure", "./configure.developer " + samba_configure_params + " --with-static-modules=!FORCED,!DEFAULT --with-shared-modules=!FORCED,!DEFAULT", "text/plain"),
+                      ("none-make", "make -j", "text/plain"),
 
                       # retry with nonshared smbd and smbtorture
                       ("nonshared-distclean", "make distclean", "text/plain"),
-                      ("nonshared-configure", samba_libs_configure_base + " --bundled-libraries=talloc,tdb,pytdb,ldb,pyldb,tevent,pytevent --with-static-modules=ALL --nonshared-binary=smbtorture,smbd/smbd", "text/plain"),
-                      ("nonshared-make", "make", "text/plain")],
+                      ("nonshared-configure", "./configure.developer " + samba_configure_params + " --bundled-libraries=talloc,tdb,pytdb,ldb,pyldb,tevent,pytevent --with-static-modules=ALL --nonshared-binary=smbtorture,smbd/smbd", "text/plain"),
+                      ("nonshared-make", "make -j", "text/plain")],
 
     "ldb" : [
               ("random-sleep", "../../script/random-sleep.sh 60 600", "text/plain"),
@@ -219,7 +222,7 @@ def run_cmd(cmd, dir=".", show=None, output=False, checkfail=True):
 class builder(object):
     '''handle build of one directory'''
 
-    def __init__(self, name, sequence):
+    def __init__(self, name, sequence, cp=True):
         self.name = name
         self.dir = builddirs[name]
 
@@ -242,7 +245,10 @@ class builder(object):
         cleanup_list.append(self.prefix)
         os.makedirs(self.sdir)
         run_cmd("rm -rf %s" % self.sdir)
-        run_cmd("git clone --recursive --shared %s %s" % (test_master, self.sdir), dir=test_master, show=True)
+        if cp:
+            run_cmd("cp --recursive --link --archive %s %s" % (test_master, self.sdir), dir=test_master, show=True)
+        else:
+            run_cmd("git clone --recursive --shared %s %s" % (test_master, self.sdir), dir=test_master, show=True)
         self.start_next()
 
     def start_next(self):
@@ -281,7 +287,7 @@ class buildlist(object):
             os.environ['AUTOBUILD_RANDOM_SLEEP_OVERRIDE'] = '1'
 
         for n in tasknames:
-            b = builder(n, tasks[n])
+            b = builder(n, tasks[n], cp=n is not "pidl")
             self.tlist.append(b)
         if options.retry:
             rebase_remote = "rebaseon"
@@ -362,6 +368,16 @@ class buildlist(object):
         self.kill_kids()
         return (0, None, None, None, "All OK")
 
+    def write_system_info(self):
+        filename = 'system-info.txt'
+        f = open(filename, 'w')
+        for cmd in ['uname -a', 'free', 'cat /proc/cpuinfo']:
+            print >>f, '### %s' % cmd
+            print >>f, run_cmd(cmd, output=True, checkfail=False)
+            print >>f
+        f.close()
+        return filename
+
     def tarlogs(self, fname):
         tar = tarfile.open(fname, "w:gz")
         for b in self.tlist:
@@ -369,6 +385,8 @@ class buildlist(object):
             tar.add(b.stderr_path, arcname="%s.stderr" % b.tag)
         if os.path.exists("autobuild.log"):
             tar.add("autobuild.log")
+        sys_info = self.write_system_info()
+        tar.add(sys_info)
         tar.close()
 
     def remove_logs(self):
@@ -707,7 +725,25 @@ blist.tarlogs("logs.tar.gz")
 if options.email is not None:
     email_failure(status, failed_task, failed_stage, failed_tag, errstr,
                   elapsed_time, log_base=options.log_base)
+else:
+    elapsed_minutes = elapsed_time / 60.0
+    print '''
 
+####################################################################
+
+AUTOBUILD FAILURE
+
+Your autobuild on %s failed after %.1f minutes
+when trying to test %s with the following error:
+
+   %s
+
+the autobuild has been abandoned. Please fix the error and resubmit.
+
+####################################################################
+
+''' % (platform.node(), elapsed_minutes, failed_task, errstr)
+    
 cleanup()
 print(errstr)
 print("Logs in logs.tar.gz")
