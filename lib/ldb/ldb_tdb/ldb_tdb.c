@@ -410,6 +410,10 @@ static int ltdb_modified(struct ldb_module *module, struct ldb_dn *dn)
 		ret = ltdb_cache_reload(module);
 	}
 
+	if (ret != LDB_SUCCESS) {
+		ltdb->reindex_failed = true;
+	}
+
 	return ret;
 }
 
@@ -718,6 +722,14 @@ static int ltdb_delete_internal(struct ldb_module *module, struct ldb_dn *dn)
 	/* remove any indexed attributes */
 	ret = ltdb_index_delete(module, msg);
 	if (ret != LDB_SUCCESS) {
+		void *data = ldb_module_get_private(module);
+		struct ltdb_private *ltdb
+			= talloc_get_type(data, struct ltdb_private);
+		/*
+		 * We must force the abort of the transaction as now
+		 * the index is out of sync with the DB
+		 */
+		ltdb->reindex_failed = true;
 		goto done;
 	}
 
@@ -1263,6 +1275,14 @@ int ltdb_modify_internal(struct ldb_module *module,
 	}
 
 done:
+	if (ret != LDB_SUCCESS) {
+		/*
+		 * We must force the abort of the transaction as now
+		 * the index is out of sync with the DB
+		 */
+		ltdb->reindex_failed = true;
+	}
+	
 	TALLOC_FREE(mem_ctx);
 	return ret;
 }
@@ -1390,6 +1410,14 @@ static int ltdb_rename(struct ltdb_context *ctx)
 
 	msg->dn = ldb_dn_copy(msg, req->op.rename.newdn);
 	if (msg->dn == NULL) {
+		/*
+		 * We must force the abort of the transaction as now
+		 * the index is out of sync with the DB, having
+		 * deleted the old entry above.
+		 */
+
+		ltdb->reindex_failed = true;
+
 		talloc_free(msg);
 		return LDB_ERR_OPERATIONS_ERROR;
 	}
@@ -1399,6 +1427,16 @@ static int ltdb_rename(struct ltdb_context *ctx)
 	 * maybe not the most efficient way
 	 */
 	ret = ltdb_add_internal(module, ltdb, msg, false);
+
+	if (ret != LDB_SUCCESS) {
+		/*
+		 * We must force the abort of the transaction as now
+		 * the index is out of sync with the DB, having
+		 * deleted the old entry above.
+		 */
+
+		ltdb->reindex_failed = true;
+	}
 
 	talloc_free(msg);
 
@@ -1443,8 +1481,16 @@ static int ltdb_start_trans(struct ldb_module *module)
 
 	ltdb_index_transaction_start(module);
 
+	ltdb->reindex_failed = false;
+
 	return LDB_SUCCESS;
 }
+
+/*
+ * Forward declaration to allow prepare_commit to in fact abort the
+ * transaction
+ */
+static int ltdb_del_trans(struct ldb_module *module);
 
 static int ltdb_prepare_commit(struct ldb_module *module)
 {
@@ -1454,6 +1500,24 @@ static int ltdb_prepare_commit(struct ldb_module *module)
 
 	if (ltdb->in_transaction != 1) {
 		return LDB_SUCCESS;
+	}
+
+	/*
+	 * Check if the last re-index failed.
+	 *
+	 * This can happen if for example a duplicate value was marked
+	 * unique.  We must not write a partial re-index into the DB.
+	 */
+	if (ltdb->reindex_failed) {
+		/*
+		 * We must instead abort the transaction so we get the
+		 * old values and old index back
+		 */
+		ltdb_del_trans(module);
+		ldb_set_errstring(ldb_module_get_ctx(module),
+				  "Failure during re-index, so "
+				  "transaction must be aborted.");
+		return LDB_ERR_OPERATIONS_ERROR;
 	}
 
 	ret = ltdb_index_transaction_commit(module);
