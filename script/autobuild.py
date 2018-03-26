@@ -155,13 +155,6 @@ tasks = {
                       ("test", "make test FAIL_IMMEDIATELY=1 TESTS='--include-env=chgdcpass --include-env=vampire_2000_dc --include-env=fl2000dc'", "text/plain"),
                       ("check-clean-tree", "script/clean-source-tree.sh", "text/plain")],
 
-    # We split out this so the isolated ad_dc tests do not wait for ad_dc_ntvfs tests (which are long)
-    "samba-ad-dc-2" : [ ("random-sleep", "../script/random-sleep.sh 60 600", "text/plain"),
-                      ("configure", "./configure.developer --with-selftest-prefix=./bin/ab" + samba_configure_params, "text/plain"),
-                      ("make", "make -j", "text/plain"),
-                      ("test", "make test FAIL_IMMEDIATELY=1 TESTS='--include-env=chgdcpass --include-env=vampire_2000_dc --include-env=fl2000dc'", "text/plain"),
-                      ("check-clean-tree", "script/clean-source-tree.sh", "text/plain")],
-
     "samba-test-only" : [ ("configure", "./configure.developer --with-selftest-prefix=./bin/ab  --abi-check-disable" + samba_configure_params, "text/plain"),
                           ("make", "make -j", "text/plain"),
                           ("test", 'make test FAIL_IMMEDIATELY=1 TESTS="${TESTS}"',"text/plain") ],
