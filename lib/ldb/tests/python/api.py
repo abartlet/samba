@@ -1408,6 +1408,136 @@ class TransIndexedAddModifyTests(IndexedAddModifyTests):
         super(TransIndexedAddModifyTests, self).tearDown()
 
 
+class BadIndexTests(LdbBaseTest):
+    def setUp(self):
+        super(BadIndexTests, self).setUp()
+        self.testdir = tempdir()
+        self.filename = os.path.join(self.testdir, "test.ldb")
+        self.ldb = ldb.Ldb(self.url(), flags=self.flags())
+        self.ldb.add({"dn": "@INDEXLIST",
+                      "@IDXATTR": [b"x", b"y", b"ou"]})
+
+        super(BadIndexTests, self).setUp()
+
+    def test_unique(self):
+        self.ldb.add({"dn": "x=x,dc=samba,dc=org",
+                      "y": "1"})
+        self.ldb.add({"dn": "x=y,dc=samba,dc=org",
+                      "y": "1"})
+        self.ldb.add({"dn": "x=z,dc=samba,dc=org",
+                      "y": "1"})
+
+        res = self.ldb.search(expression="(y=1)",
+                              base="dc=samba,dc=org")
+        self.assertEquals(len(res), 3)
+
+        # Now set this to unique index, but forget to check the result
+        try:
+            self.ldb.add({"dn": "@ATTRIBUTES",
+                        "y": "UNIQUE_INDEX"})
+            self.fail()
+        except ldb.LdbError:
+            pass
+
+        # We must still have a working index
+        res = self.ldb.search(expression="(y=1)",
+                              base="dc=samba,dc=org")
+        self.assertEquals(len(res), 3)
+
+    def test_unique_transaction(self):
+        self.ldb.add({"dn": "x=x,dc=samba,dc=org",
+                      "y": "1"})
+        self.ldb.add({"dn": "x=y,dc=samba,dc=org",
+                      "y": "1"})
+        self.ldb.add({"dn": "x=z,dc=samba,dc=org",
+                      "y": "1"})
+
+        res = self.ldb.search(expression="(y=1)",
+                              base="dc=samba,dc=org")
+        self.assertEquals(len(res), 3)
+
+        self.ldb.transaction_start()
+
+        # Now set this to unique index, but forget to check the result
+        try:
+            self.ldb.add({"dn": "@ATTRIBUTES",
+                        "y": "UNIQUE_INDEX"})
+        except ldb.LdbError:
+            pass
+
+        try:
+            self.ldb.transaction_commit()
+            self.fail()
+
+        except ldb.LdbError as err:
+            enum = err.args[0]
+            self.assertEqual(enum, ldb.ERR_OPERATIONS_ERROR)
+
+        # We must still have a working index
+        res = self.ldb.search(expression="(y=1)",
+                              base="dc=samba,dc=org")
+        self.assertEquals(len(res), 3)
+
+    def test_modify_transaction(self):
+        attr_added_twice = False
+        
+        self.ldb.add({"dn": "x=y,dc=samba,dc=org",
+                      "y": "2",
+                      "z": "2"})
+
+        res = self.ldb.search(expression="(y=2)",
+                              base="dc=samba,dc=org")
+        self.assertEquals(len(res), 1)
+
+        self.ldb.add({"dn": "@ATTRIBUTES",
+                      "y": "UNIQUE_INDEX"})
+
+        self.ldb.transaction_start()
+
+        m = ldb.Message()
+        m.dn = ldb.Dn(self.ldb, "x=y,dc=samba,dc=org")
+        m["0"] = ldb.MessageElement([], ldb.FLAG_MOD_DELETE, "y")
+        m["1"] = ldb.MessageElement([], ldb.FLAG_MOD_DELETE, "not-here")
+
+        try:
+            self.ldb.modify(m)
+            self.fail()
+
+        except ldb.LdbError as err:
+            enum = err.args[0]
+            self.assertEqual(enum, ldb.ERR_NO_SUCH_ATTRIBUTE)
+
+        try:
+            self.ldb.transaction_commit()
+            # We should fail here, but we want to be sure
+            # we fail below
+            
+        except ldb.LdbError as err:
+            enum = err.args[0]
+            self.assertEqual(enum, ldb.ERR_OPERATIONS_ERROR)
+            
+        try:
+            self.ldb.add({"dn": "x=y2,dc=samba,dc=org",
+                          "y": "2"})
+            attr_added_twice = True
+        except ldb.LdbError as err:
+            enum = err.args[0]
+            self.assertEqual(enum, ldb.ERR_CONSTRAINT_VIOLATION)
+
+        # We must still have a working index
+        
+        res = self.ldb.search(expression="(y=2)",
+                              base="dc=samba,dc=org")
+        self.assertEquals(len(res), 1)
+        self.assertEquals(str(res[0].dn), "x=y,dc=samba,dc=org")
+
+        if attr_added_twice:
+            self.fail("Added unique attribute twice")
+
+    def tearDown(self):
+        super(BadIndexTests, self).tearDown()
+
+
 class DnTests(TestCase):
 
     def setUp(self):
