@@ -1063,14 +1063,22 @@ _PUBLIC_ uint32_t ndr_get_array_size(struct ndr_pull *ndr, const void *p)
 /*
   check the stored array size field
 */
-_PUBLIC_ enum ndr_err_code ndr_check_array_size(struct ndr_pull *ndr, void *p, uint32_t size)
+_PUBLIC_ enum ndr_err_code ndr_check_array_size(struct ndr_pull *ndr,
+						void *p,
+						uint32_t size,
+						const char *token_name,
+						const char *el_name)
 {
 	uint32_t stored;
 	stored = ndr_token_peek(&ndr->array_size_list, p);
 	if (stored != size) {
 		return ndr_pull_error(ndr, NDR_ERR_ARRAY_SIZE,
-				      "Bad array size - got %u expected %u\n",
-				      stored, size);
+				      "Bad array size in %s vs %s "
+				      "- got %u expected %u\n",
+				      token_name,
+				      el_name,
+				      stored,
+				      size);
 	}
 	return NDR_ERR_SUCCESS;
 }
@@ -1078,13 +1086,16 @@ _PUBLIC_ enum ndr_err_code ndr_check_array_size(struct ndr_pull *ndr, void *p, u
 /*
   pull an array length field and add it to the array_length_list token list
 */
-_PUBLIC_ enum ndr_err_code ndr_pull_array_length(struct ndr_pull *ndr, const void *p)
+_PUBLIC_ enum ndr_err_code ndr_pull_array_length(struct ndr_pull *ndr,
+						 const void *p,
+						 const char *name)
 {
 	uint32_t length, offset;
 	NDR_CHECK(ndr_pull_uint3264(ndr, NDR_SCALARS, &offset));
 	if (offset != 0) {
 		return ndr_pull_error(ndr, NDR_ERR_ARRAY_SIZE,
-				      "non-zero array offset %u\n", offset);
+				      "non-zero array offset in %s "
+				      "%u\n", name, offset);
 	}
 	NDR_CHECK(ndr_pull_uint3264(ndr, NDR_SCALARS, &length));
 	return ndr_token_store(ndr, &ndr->array_length_list, p, length);
@@ -1101,14 +1112,22 @@ _PUBLIC_ uint32_t ndr_get_array_length(struct ndr_pull *ndr, const void *p)
 /*
   check the stored array length field
 */
-_PUBLIC_ enum ndr_err_code ndr_check_array_length(struct ndr_pull *ndr, void *p, uint32_t length)
+_PUBLIC_ enum ndr_err_code ndr_check_array_length(struct ndr_pull *ndr,
+						  void *p,
+						  uint32_t length,
+						  const char *token_name,
+						  const char *el_name)
 {
 	uint32_t stored;
 	stored = ndr_token_peek(&ndr->array_length_list, p);
 	if (stored != length) {
 		return ndr_pull_error(ndr, NDR_ERR_ARRAY_SIZE,
-				      "Bad array length - got %u expected %u\n",
-				      stored, length);
+				      "Bad array length in %s vs %s"
+				      "- got %u expected %u\n",
+				      token_name,
+				      el_name,
+				      stored,
+				      length);
 	}
 	return NDR_ERR_SUCCESS;
 }

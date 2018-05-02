@@ -423,7 +423,7 @@ sub ParseArrayPullHeader($$$$$$)
 	}
 
 	if ($l->{IS_VARYING}) {
-		$self->pidl("NDR_CHECK(ndr_pull_array_length($ndr, " . get_pointer_to($var_name) . "));");
+		$self->pidl("NDR_CHECK(ndr_pull_array_length($ndr, " . get_pointer_to($var_name) . ", \"$var_name\"));");
 	}
 
 	my $array_size = $self->ParseArrayPullGetSize($e, $l, $ndr, $var_name, $env);
@@ -432,7 +432,7 @@ sub ParseArrayPullHeader($$$$$$)
 	if ($array_length ne $array_size) {
 		$self->pidl("if ($array_length > $array_size) {");
 		$self->indent;
-		$self->pidl("return ndr_pull_error($ndr, NDR_ERR_ARRAY_SIZE, \"Bad array size %u should exceed array length %u\", $array_size, $array_length);");
+		$self->pidl("return ndr_pull_error($ndr, NDR_ERR_ARRAY_SIZE, \"Bad array size in $var_name %u should exceed array length %u\", $array_size, $array_length);");
 		$self->deindent;
 		$self->pidl("}");
 	}
@@ -444,7 +444,7 @@ sub ParseArrayPullHeader($$$$$$)
 			check_null_pointer($e, $env, sub { $self->defer(shift); },
 					   "return ndr_pull_error($ndr, NDR_ERR_INVALID_POINTER, \"NULL Pointer for size_is()\");"),
 			check_fully_dereferenced($e, $env));
-		$self->defer("NDR_CHECK(ndr_check_array_size($ndr, (void*)" . get_pointer_to($var_name) . ", $size));");
+		$self->defer("NDR_CHECK(ndr_check_array_size($ndr, (void*)" . get_pointer_to($var_name) . ", $size, \"$var_name\", \"$size\"));");
 		$self->defer_deindent;
 		$self->defer("}");
 	}
@@ -456,7 +456,7 @@ sub ParseArrayPullHeader($$$$$$)
 			check_null_pointer($e, $env, sub { $self->defer(shift); },
 					   "return ndr_pull_error($ndr, NDR_ERR_INVALID_POINTER, \"NULL Pointer for length_is()\");"),
 			check_fully_dereferenced($e, $env));
-		$self->defer("NDR_CHECK(ndr_check_array_length($ndr, (void*)" . get_pointer_to($var_name) . ", $length));");
+		$self->defer("NDR_CHECK(ndr_check_array_length($ndr, (void*)" . get_pointer_to($var_name) . ", $length, \"$var_name\", \"$length\"));");
 		$self->defer_deindent;
 		$self->defer("}");
 	}
