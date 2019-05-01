@@ -1,0 +1,18 @@
+env:
+  global:
+   # The next declaration is the encrypted COVERITY_SCAN_TOKEN, created
+   #   via the "travis encrypt" command using the project repo's public key
+   - secure: "mYdFvz1BMxgf8GoXir5+b4jqcpp9zVXkY6scxi2X28hcKo91yKfI4XGxcMxK3Ixx2DV/MAdm4fprY57IX9M1txzRT7I0E5NINb6eG8cf8jzPqp+MB5wAEMCkdLT8Onq9R6DyUUukBmGouOhWr7wwZD4kYl33HC+cyhSNM5O9t7JMZj4I00GPLZZ6BJIPrzKbY19Vshnm8xNgmswxzEN2XD8Yt5qQv6P1lbf7csqH74XhWhKtMMqPC3Z+KRKmpoa/C5A3tlX3z/+OlP2XqkjZb2nFeC7rdE++6dNcyq9XyG7m8nA5lVH4fqPMiUjvf8NMEvM5vn4UJPVqIjGjOZOPsHCKVjOOi2D3S3G0YJqwsbiGJZ1TOAw9UXvL1jHsNmHXTUwPHW81XCJyqvN0Wk/1Q/Y5J6w+GKDS4opIxk5y8bxoHxS7JoqLNnYvar8xNhRBYjVxOw1P5Qt8jEq5jvw7qHuxL0XAhh+8WWeJYCnwzcq27mWr/OrkZfew+a+94FX2dSMm2kae7iouo9/ovrqVhvdjMGMdx0F1pYxgh1NJvef3lqBm13SPaUc9KlVmCc8g90Vl+FuHktVcp0j84PNwpdqv2O5GiUiIaLnKh+563jvo5Azg2k+Od6chwdI1/u+HbZWC7UuNMaA7Z441nFvM/Sv/xvi0weRT070Rcyi9Fm8="
+
+before_install:
+  - echo -n | openssl s_client -connect https://scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-
+
+addons:
+  coverity_scan:
+    project:
+      name: "abartlet/samba"
+      description: Samba
+    notification_email: abartlet@samba.org
+    build_command_prepend: ./configure.developer
+    build_command: make -j
+    branch_pattern: coverity_scan
